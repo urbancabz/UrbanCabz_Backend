@@ -10,7 +10,7 @@ async function requireAuth(req, res, next) {
     const token = auth.split(' ')[1];
     const payload = verifyToken(token); // throws if invalid
     const user = await prisma.user.findUnique({ where: { id: payload.userId }, include: { role: true }});
-    if (!user || !user.isActive) return res.status(401).json({ message: 'Unauthorized' });
+    if (!user) return res.status(401).json({ message: 'Unauthorized' });
 
     req.user = {
       id: user.id,

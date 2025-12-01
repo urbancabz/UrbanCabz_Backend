@@ -5,6 +5,16 @@ const { signToken } = require('../utils/jwt');
 
 const SALT_ROUNDS = 10;
 
+function toPublicUser(user, roleName) {
+  return {
+    id: user.id,
+    email: user.email,
+    name: user.name,
+    phone: user.phone,
+    role: roleName || user.role?.name || null
+  };
+}
+
 async function register({ email,password, name, phone, roleName = 'customer' }) {
   // check existing
   const existing = await prisma.user.findUnique({ where: { email } });
@@ -28,13 +38,21 @@ async function register({ email,password, name, phone, roleName = 'customer' }) 
       role_id: role.id,
     },
     select: {
-      id: true, email: true, name: true, phone: true, role_id: true
+      id: true,
+      email: true,
+      name: true,
+      phone: true,
+      role: {
+        select: {
+          name: true
+        }
+      }
     }
   });
 
   const token = signToken({ userId: user.id, role: role.name });
 
-  return { user, token };
+  return { user: toPublicUser(user, role.name), token };
 }
 
 async function login({ email, password }) {
@@ -67,15 +85,60 @@ async function login({ email, password }) {
   const token = signToken({ userId: user.id, role: user.role?.name || 'customer' });
 
   // return user public fields + token
-  const publicUser = {
-    id: user.id,
-    email: user.email,
-    name: user.name,
-    phone: user.phone,
-    role: user.role?.name || null
-  };
-
-  return { user: publicUser, token };
+  return { user: toPublicUser(user), token };
 }
 
-module.exports = { register, login };
+async function getProfile(userId) {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: {
+      id: true,
+      email: true,
+      name: true,
+      phone: true,
+      role: {
+        select: { name: true }
+      }
+    }
+  });
+
+  if (!user) throw { status: 404, message: 'User not found' };
+
+  return { user: toPublicUser(user) };
+}
+
+async function updateProfile(userId, payload) {
+  const data = {};
+  if (typeof payload.name !== 'undefined') data.name = payload.name;
+  if (typeof payload.phone !== 'undefined') data.phone = payload.phone;
+  if (typeof payload.email !== 'undefined') {
+    // ensure unique email
+    const existing = await prisma.user.findUnique({ where: { email: payload.email } });
+    if (existing && existing.id !== userId) {
+      throw { status: 409, message: 'Email already in use' };
+    }
+    data.email = payload.email;
+  }
+
+  if (Object.keys(data).length === 0) {
+    return getProfile(userId);
+  }
+
+  const user = await prisma.user.update({
+    where: { id: userId },
+    data,
+    select: {
+      id: true,
+      email: true,
+      name: true,
+      phone: true,
+      role: {
+        select: { name: true }
+      }
+    }
+  });
+
+  return { user: toPublicUser(user) };
+}
+
+module.exports = { register, login, getProfile, updateProfile };
