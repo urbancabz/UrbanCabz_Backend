@@ -47,12 +47,16 @@ model booking {
   // Booking lifecycle: PENDING_PAYMENT, PAID, CANCELLED, COMPLETED
   status          String     @default("PENDING_PAYMENT")
 
+  // Taxi assignment lifecycle for this booking: NOT_ASSIGNED, ASSIGNED, ON_TRIP, COMPLETED, CANCELLED
+  taxi_assign_status String  @default("NOT_ASSIGNED")
+
   created_at      DateTime?  @default(now()) @db.Timestamptz(6)
   updated_at      DateTime?  @updatedAt @db.Timestamptz(6)
 
   // relations
   user            user       @relation(fields: [user_id], references: [id], onDelete: Cascade)
   payments        payment[]
+  assign_taxis    assign_taxi[]
 }
 
 // Payment attempts/records for a booking (e.g. Stripe/Razorpay, etc.)
@@ -72,6 +76,23 @@ model payment {
 
   // relations
   booking         booking     @relation(fields: [booking_id], references: [id], onDelete: Cascade)
+}
+
+// Admin-side assignment of a taxi/driver to a confirmed (paid) booking.
+model assign_taxi {
+  id           Int      @id @default(autoincrement())
+  booking_id   Int
+
+  driver_name   String
+  driver_number String
+  cab_number    String
+  cab_name      String
+
+  created_at   DateTime? @default(now()) @db.Timestamptz(6)
+  updated_at   DateTime? @updatedAt @db.Timestamptz(6)
+
+  // relations
+  booking      booking  @relation(fields: [booking_id], references: [id], onDelete: Cascade)
 }
 
 model PasswordResetOtp {
