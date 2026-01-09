@@ -63,7 +63,7 @@ const updateBookingStatus = async (req, res) => {
 const completeTrip = async (req, res) => {
     try {
         const { id } = req.params;
-        const { actual_km, rate_per_km, toll_charges, waiting_charges, notes } = req.body;
+        const { actual_km, rate_per_km, toll_charges, notes } = req.body;
         const adminId = req.user?.id || 0;
 
         const booking = await prisma.booking.findUnique({
@@ -85,10 +85,9 @@ const completeTrip = async (req, res) => {
         const pricePerKm = parseFloat(rate_per_km) || 12; // Default rate
         const extraKmCharge = extraKm * pricePerKm;
         const tollAmount = parseFloat(toll_charges) || 0;
-        const waitingAmount = parseFloat(waiting_charges) || 0;
 
         // Calculate new total
-        const adjustments = extraKmCharge + tollAmount + waitingAmount;
+        const adjustments = extraKmCharge + tollAmount;
         const newTotal = booking.total_amount + adjustments;
 
         // Update booking with new fields
@@ -124,15 +123,6 @@ const completeTrip = async (req, res) => {
                 admin_id: adminId
             });
         }
-        if (waitingAmount > 0) {
-            adjustmentRecords.push({
-                booking_id: booking.id,
-                type: 'WAITING',
-                amount: waitingAmount,
-                description: 'Waiting charges',
-                admin_id: adminId
-            });
-        }
 
         if (adjustmentRecords.length > 0) {
             await prisma.fare_adjustment.createMany({ data: adjustmentRecords });
@@ -159,7 +149,6 @@ const completeTrip = async (req, res) => {
                     extra_km: extraKm,
                     extra_km_charge: extraKmCharge,
                     toll_charges: tollAmount,
-                    waiting_charges: waitingAmount,
                     total_adjustments: adjustments,
                     new_total: newTotal
                 }

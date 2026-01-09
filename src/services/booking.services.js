@@ -86,7 +86,6 @@ async function createBookingWithPendingPayment({
   const actualPaymentAmount = (paymentAmount !== undefined && paymentAmount !== null)
     ? paymentAmount
     : totalAmount;
-
   const remainingAmount = Math.max(0, totalAmount - actualPaymentAmount);
 
   const booking = await prisma.booking.create({
@@ -102,12 +101,12 @@ async function createBookingWithPendingPayment({
       status: 'PENDING_PAYMENT',
       payments: {
         create: {
-          amount: actualPaymentAmount,
+          amount: actualPaymentAmount, // The actual payment amount (could be partial)
           currency: 'INR',
           status: 'PENDING',
           provider: 'razorpay',
-          provider_txn_id: razorpayOrderId,
-          remaining_amount: remainingAmount
+          provider_txn_id: razorpayOrderId, // Store order_id temporarily, will update with payment_id later
+          remaining_amount: remainingAmount // Calculate remaining amount
         }
       }
     },

@@ -76,14 +76,17 @@ model payment {
   amount          Float
   currency        String      @default("INR")
 
+  // Remaining amount to be paid (for partial payments)
+  // If amount = 100 and booking.total_amount = 260, then remainingAmount = 160
+  remaining_amount Float?    @default(0)
+
   // status example: CREATED, SUCCESS, FAILED, REFUNDED
   status          String
 
   provider        String      // e.g. "stripe", "razorpay", "cash"
   provider_txn_id String?     @unique
 
-  // Remaining amount after this payment (for partial payments)
-  remaining_amount Float?
+  // remaining_amount removed (duplicate)
 
   created_at      DateTime?   @default(now()) @db.Timestamptz(6)
 

@@ -33,13 +33,40 @@ router.post(
 // ===================== BOOKING LIFECYCLE ROUTES =====================
 
 // Update booking status (manual trip lifecycle)
-router.patch('/bookings/:id/status', requireAuth, requireAdmin, lifecycleController.updateBookingStatus);
+router.patch(
+  '/bookings/:id/status',
+  requireAuth,
+  requireAdmin,
+  [
+    body('status').isString().isIn(['IN_PROGRESS', 'COMPLETED', 'CANCELLED', 'PAID', 'PENDING_PAYMENT']).withMessage('Invalid status'),
+    body('reason').optional().isString()
+  ],
+  lifecycleController.updateBookingStatus
+);
 
 // Complete trip with fare adjustments (extra KM, tolls, waiting)
-router.post('/bookings/:id/complete', requireAuth, requireAdmin, lifecycleController.completeTrip);
+router.post(
+  '/bookings/:id/complete',
+  requireAuth,
+  requireAdmin,
+  [
+    body('actual_km').isFloat({ min: 0 }).withMessage('Actual KM must be a positive number'),
+    body('toll_charges').optional().isFloat({ min: 0 }).withMessage('Toll charges must be positive'),
+    body('rate_per_km').optional().isFloat({ min: 0 }).withMessage('Rate per KM must be positive')
+  ],
+  lifecycleController.completeTrip
+);
 
 // Cancel booking with reason
-router.post('/bookings/:id/cancel', requireAuth, requireAdmin, lifecycleController.cancelBooking);
+router.post(
+  '/bookings/:id/cancel',
+  requireAuth,
+  requireAdmin,
+  [
+    body('reason').isString().notEmpty().withMessage('Cancellation reason is required')
+  ],
+  lifecycleController.cancelBooking
+);
 
 // Internal notes for a booking
 router.get('/bookings/:id/notes', requireAuth, requireAdmin, lifecycleController.getBookingNotes);

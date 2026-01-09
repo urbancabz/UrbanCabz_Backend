@@ -3,7 +3,7 @@ const authRoutes = require('./routes/auth.routes');
 const bookingRoutes = require('./routes/booking.routes');
 const paymentRoutes = require('./routes/payment.routes');
 const adminRoutes = require('./routes/admin.routes');
-const fleetRoutes = require('./routes/fleet.routes');
+
 const cors = require('cors');
 const app = express();
 app.use(cors());
