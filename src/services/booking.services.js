@@ -184,9 +184,40 @@ async function getMyBookings(userId) {
   });
 }
 
+async function getCompanyBookings(companyId) {
+  if (!companyId) throw { status: 400, message: 'companyId is required' };
+
+  // Find all users associated with this company
+  const b2bUsers = await prisma.b2b_user.findMany({
+    where: { company_id: companyId },
+    select: { user_id: true }
+  });
+
+  const userIds = b2bUsers.map(bu => bu.user_id);
+
+  return prisma.booking.findMany({
+    where: {
+      user_id: { in: userIds }
+    },
+    orderBy: { created_at: 'desc' },
+    include: {
+      payments: true,
+      user: {
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          phone: true
+        }
+      }
+    }
+  });
+}
+
 module.exports = {
   createBookingAfterPayment,
   createBookingWithPendingPayment,
   updateBookingAfterPaymentSuccess,
-  getMyBookings
+  getMyBookings,
+  getCompanyBookings
 };

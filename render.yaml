@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: urban-cabz-backend
+    env: node
+    plan: free
+    buildCommand: npm install && npx prisma generate
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: urban-cabz-db
+          property: connectionString
+      - key: JWT_SECRET
+        generate: true
+      - key: RAZORPAY_KEY_ID
+        sync: false
+      - key: RAZORPAY_KEY_SECRET
+        sync: false

@@ -3,6 +3,19 @@ const express = require('express');
 const { body } = require('express-validator');
 const authController = require('../controllers/auth.controller');
 const { requireAuth } = require('../middlewares/auth.middleware');
+const rateLimit = require('../middlewares/rate-limit.middleware');
+
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 5,
+  message: 'Too many login attempts, please try again after 15 minutes'
+});
+
+const otpLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  max: 3,
+  message: 'Too many OTP requests, please try again later'
+});
 
 const router = express.Router();
 
@@ -19,6 +32,7 @@ router.post(
 
 router.post(
   '/login',
+  loginLimiter,
   [
     body('email').isEmail().withMessage('Valid email required'),
     body('password').exists().withMessage('Password is required')
@@ -41,6 +55,7 @@ router.put(
 
 router.post(
   '/password/forgot',
+  otpLimiter,
   [
     body('email').optional().isEmail().withMessage('Valid email required'),
     body('phone').optional().isString().trim(),
@@ -62,6 +77,27 @@ router.post(
     body('newPassword').isLength({ min: 6 }).withMessage('Password min 6 chars'),
   ],
   authController.resetPasswordWithOtp
+);
+
+// ============ B2B Authentication Routes ============
+
+router.post(
+  '/b2b/login',
+  loginLimiter,
+  [
+    body('email').isEmail().withMessage('Valid email required'),
+    body('password').optional().isString()
+  ],
+  authController.b2bLogin
+);
+
+router.post(
+  '/b2b/set-password',
+  [
+    body('email').isEmail().withMessage('Valid email required'),
+    body('password').isLength({ min: 6 }).withMessage('Password min 6 chars')
+  ],
+  authController.b2bSetPassword
 );
 
 module.exports = router;

@@ -2,6 +2,7 @@
 const express = require('express');
 const { body } = require('express-validator');
 const adminController = require('../controllers/admin.controller');
+const driverController = require('../controllers/driver.controller');
 const lifecycleController = require('../controllers/bookingLifecycle.controller');
 const { requireAuth, requireAdmin } = require('../middlewares/auth.middleware');
 
@@ -82,6 +83,63 @@ router.get('/history/cancelled', requireAuth, requireAdmin, adminController.getC
 
 // Get pending payment bookings (incomplete Razorpay transactions)
 router.get('/pending-payments', requireAuth, requireAdmin, adminController.getPendingPayments);
+
+// ===================== B2B DISPATCH ROUTES =====================
+
+// List all B2B bookings
+router.get('/b2b-bookings', requireAuth, requireAdmin, adminController.listB2BBookings);
+
+// Assign taxi to a B2B booking
+router.post(
+  '/b2b-bookings/:bookingId/assign-taxi',
+  requireAuth,
+  requireAdmin,
+  [
+    body('driverName').isString().notEmpty(),
+    body('driverNumber').isString().notEmpty(),
+    body('cabNumber').isString().notEmpty(),
+    body('cabName').isString().notEmpty(),
+  ],
+  adminController.upsertB2BAssignTaxi
+);
+
+// Mark B2B bill as paid (offline)
+router.post(
+  '/b2b-bookings/:bookingId/mark-paid',
+  requireAuth,
+  requireAdmin,
+  [
+    body('mode').isString().notEmpty(),
+    body('remarks').optional().isString()
+  ],
+  adminController.markB2BBillPaid
+);
+
+// B2B Lifecycle
+router.patch('/b2b-bookings/:id/status', requireAuth, requireAdmin, adminController.updateB2BBookingStatus);
+router.post('/b2b-bookings/:id/complete', requireAuth, requireAdmin, adminController.completeB2BTrip);
+router.post('/b2b-bookings/:id/cancel', requireAuth, requireAdmin, adminController.cancelB2BBooking);
+
+// ===================== DRIVER REGISTRY ROUTES =====================
+router.get('/drivers', requireAuth, requireAdmin, driverController.getDrivers);
+router.get('/drivers/:id', requireAuth, requireAdmin, driverController.getDriver);
+router.post(
+  '/drivers',
+  requireAuth,
+  requireAdmin,
+  [
+    body('name').isString().notEmpty(),
+    body('phone').isString().notEmpty(),
+  ],
+  driverController.createDriver
+);
+router.put(
+  '/drivers/:id',
+  requireAuth,
+  requireAdmin,
+  driverController.updateDriver
+);
+router.delete('/drivers/:id', requireAuth, requireAdmin, driverController.deleteDriver);
 
 module.exports = router;
 
