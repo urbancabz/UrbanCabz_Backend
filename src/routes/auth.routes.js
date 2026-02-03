@@ -32,7 +32,6 @@ router.post(
 
 router.post(
   '/login',
-  loginLimiter,
   [
     body('email').isEmail().withMessage('Valid email required'),
     body('password').exists().withMessage('Password is required')
@@ -83,7 +82,6 @@ router.post(
 
 router.post(
   '/b2b/login',
-  loginLimiter,
   [
     body('email').isEmail().withMessage('Valid email required'),
     body('password').optional().isString()
