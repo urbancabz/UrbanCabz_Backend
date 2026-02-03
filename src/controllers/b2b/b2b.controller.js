@@ -151,7 +151,7 @@ const getB2BRequestById = async (req, res) => {
 const approveB2BRequest = async (req, res) => {
     try {
         const { id } = req.params;
-        const { admin_notes } = req.body;
+        const { admin_notes, address, city, state, pincode } = req.body;
         const adminId = req.user?.id; // From auth middleware
 
         const request = await prisma.b2b_request.findUnique({
@@ -184,7 +184,11 @@ const approveB2BRequest = async (req, res) => {
                     data: {
                         company_name: request.company_name,
                         company_email: request.contact_email,
-                        company_phone: request.contact_phone
+                        company_phone: request.contact_phone,
+                        address: address || null,
+                        city: city || null,
+                        state: state || null,
+                        pincode: pincode || null
                     }
                 });
             }
@@ -459,6 +463,72 @@ const createCreditBooking = async (req, res) => {
         res.status(500).json({
             success: false,
             message: error.message || 'Failed to create booking'
+        });
+    }
+};
+
+const getCompanyPayments = async (req, res) => {
+    try {
+        const userId = req.user.id;
+
+        // Get user's company
+        const b2bUser = await prisma.b2b_user.findFirst({
+            where: { user_id: userId },
+            include: { company: true }
+        });
+
+        if (!b2bUser || !b2bUser.company) {
+            return res.status(403).json({
+                success: false,
+                message: 'Company not found for this user'
+            });
+        }
+
+        const companyId = b2bUser.company.id;
+
+        // Fetch all Ledger Payments for this company
+        const payments = await prisma.b2b_payment.findMany({
+            where: { company_id: companyId },
+            orderBy: { paid_at: 'desc' }
+        });
+
+        // Fetch all B2B bookings to calculate summary stats
+        const bookings = await prisma.b2b_booking.findMany({
+            where: { company_id: companyId }
+        });
+
+        // Calculate Billing Summary
+        let totalBilled = 0;
+        let totalPaid = 0;
+
+        bookings.forEach(b => {
+            totalBilled += parseFloat(b.total_amount) || 0;
+        });
+
+        payments.forEach(p => {
+            totalPaid += parseFloat(p.amount) || 0;
+        });
+
+        const billingSummary = {
+            totalBilled,
+            totalPaid,
+            outstanding: totalBilled - totalPaid,
+            totalBookings: bookings.length
+        };
+
+        res.json({
+            success: true,
+            data: {
+                payments,
+                billingSummary
+            }
+        });
+
+    } catch (error) {
+        console.error('Get My Company Payments Error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to fetch payment history'
         });
     }
 };
@@ -771,6 +841,7 @@ module.exports = {
     getMyCompanyProfile,
     createCreditBooking,
     getCompanyBookings,
+    getCompanyPayments,
     getCompanies,
     getCompanyFleet,
     manageCompanyFleet,

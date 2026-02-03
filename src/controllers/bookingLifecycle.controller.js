@@ -21,7 +21,7 @@ const updateBookingStatus = async (req, res) => {
         const validTransitions = {
             'PAID': ['IN_PROGRESS', 'CANCELLED'],
             'IN_PROGRESS': ['COMPLETED', 'CANCELLED'],
-            'PENDING_PAYMENT': ['PAID', 'CANCELLED'],
+            'PENDING_PAYMENT': ['PAID', 'CANCELLED', 'IN_PROGRESS'], // Allow starting trip if partial payment
         };
 
         if (!validTransitions[oldStatus]?.includes(status)) {

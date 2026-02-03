@@ -17,6 +17,7 @@ router.post('/requests/:id/reject', requireAuth, requireRole(['admin']), b2bCont
 router.get('/company/my', requireAuth, b2bController.getMyCompanyProfile);
 router.get('/company/:id', requireAuth, b2bController.getCompanyById);
 router.get('/bookings', requireAuth, b2bController.getCompanyBookings);
+router.get('/payments', requireAuth, b2bController.getCompanyPayments);
 router.post('/bookings', requireAuth, b2bController.createCreditBooking);
 
 // Company Fleet Management (Admin)

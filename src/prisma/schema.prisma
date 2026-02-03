@@ -19,6 +19,7 @@ model user {
   password_hash String?
   name          String?
   phone         String?
+  is_verified   Boolean   @default(false)
   role_id       Int?
   is_first_login Boolean  @default(true)  // Track if B2B user needs to set password
   created_at    DateTime? @default(now()) @db.Timestamptz(6)
@@ -379,4 +380,15 @@ model driver {
   updated_at   DateTime @updatedAt @db.Timestamptz(6)
 
   @@index([phone])
+}
+
+// Global Pricing Settings
+model pricing_settings {
+  id                     Int      @id @default(autoincrement())
+  min_km_threshold       Float    @default(100.0)
+  min_km_airport_apply   Boolean  @default(false)
+  min_km_oneway_apply    Boolean  @default(false)
+  min_km_roundtrip_apply Boolean  @default(false)
+  
+  updated_at             DateTime @updatedAt @db.Timestamptz(6)
 }

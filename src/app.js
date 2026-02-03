@@ -1,4 +1,5 @@
 const express = require('express');
+const path = require('path');
 const authRoutes = require('./routes/auth.routes');
 const bookingRoutes = require('./routes/booking.routes');
 const paymentRoutes = require('./routes/payment.routes');
@@ -11,6 +12,9 @@ const cors = require('cors');
 const app = express();
 app.use(cors());
 app.use(express.json());
+
+// Serve uploaded files statically
+app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
 // Security Headers (Manual implementation of basic helmet features)
 app.use((req, res, next) => {
@@ -36,6 +40,7 @@ app.use('/api/v1/payments', paymentRoutes);
 app.use('/api/v1/admin', adminRoutes);
 app.use('/api/v1/b2b', b2bRoutes);
 app.use('/api/v1/fleet', fleetRoutes);
+app.use('/api/v1/pricing', require('./routes/pricing.routes'));
 
 app.get('/health', (req, res) => res.send({ ok: true }));
 

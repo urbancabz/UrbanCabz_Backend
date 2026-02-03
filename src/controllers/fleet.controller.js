@@ -42,7 +42,10 @@ const getFleetVehicle = async (req, res) => {
 // CREATE fleet vehicle
 const createFleetVehicle = async (req, res) => {
     try {
-        const { name, seats, base_price_per_km, category, description, image_url, is_active } = req.body;
+        const {
+            name, seats, base_price_per_km, category, description, image_url, is_active,
+            min_km_threshold, min_km_airport_apply, min_km_oneway_apply, min_km_roundtrip_apply
+        } = req.body;
 
         if (!name || !seats || !base_price_per_km || !category) {
             return res.status(400).json({ success: false, message: 'Name, seats, base_price_per_km, and category are required' });
@@ -83,7 +86,10 @@ const createFleetVehicle = async (req, res) => {
 const updateFleetVehicle = async (req, res) => {
     try {
         const { id } = req.params;
-        const { name, seats, base_price_per_km, category, description, image_url, is_active } = req.body;
+        const {
+            name, seats, base_price_per_km, category, description, image_url, is_active,
+            min_km_threshold, min_km_airport_apply, min_km_oneway_apply, min_km_roundtrip_apply
+        } = req.body;
 
         const existing = await prisma.fleet_vehicle.findUnique({ where: { id: parseInt(id) } });
         if (!existing) {
@@ -158,10 +164,32 @@ const deleteFleetVehicle = async (req, res) => {
     }
 };
 
+// UPLOAD vehicle image
+const uploadVehicleImage = async (req, res) => {
+    try {
+        if (!req.file) {
+            return res.status(400).json({ success: false, message: 'No image file provided' });
+        }
+
+        // Cloudinary returns the URL in req.file.path
+        const imageUrl = req.file.path;
+
+        res.json({
+            success: true,
+            data: { image_url: imageUrl },
+            message: 'Image uploaded successfully'
+        });
+    } catch (error) {
+        console.error('Error uploading image:', error);
+        res.status(500).json({ success: false, message: 'Failed to upload image' });
+    }
+};
+
 module.exports = {
     getFleetVehicles,
     getFleetVehicle,
     createFleetVehicle,
     updateFleetVehicle,
-    deleteFleetVehicle
+    deleteFleetVehicle,
+    uploadVehicleImage
 };

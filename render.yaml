@@ -1,3 +1,9 @@
+databases:
+  - name: urban-cabz-db
+    databaseName: urban_cabz
+    user: urban_cabz_user
+    plan: free # or 'starter' if you need persistence exceeding free tier limits
+
 services:
   - type: web
     name: urban-cabz-backend

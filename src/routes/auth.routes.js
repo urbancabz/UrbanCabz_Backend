@@ -100,4 +100,22 @@ router.post(
   authController.b2bSetPassword
 );
 
+// Verification routes
+router.post(
+  '/verify-phone',
+  [
+    body('userId').isInt().withMessage('User ID required'),
+    body('otp').notEmpty().withMessage('OTP is required')
+  ],
+  authController.verifyPhone
+);
+
+router.post(
+  '/resend-verification-otp',
+  [
+    body('userId').isInt().withMessage('User ID required')
+  ],
+  authController.resendVerificationOtp
+);
+
 module.exports = router;

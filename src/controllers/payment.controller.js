@@ -4,6 +4,7 @@ const crypto = require('crypto');
 const { createOrder } = require('../services/payment.razorpay');
 const bookingService = require('../services/booking.services');
 const { sendBookingConfirmationWhatsApp } = require('../services/twilio.service');
+const emailService = require('../services/email.service');
 
 // POST /api/v1/payments/create-order
 async function createRazorpayOrder(req, res) {
@@ -113,20 +114,29 @@ async function verifyPaymentAndCreateBooking(req, res) {
 
     console.log(`[Payment] Payment verified successfully - Booking ID: ${booking.id}`);
 
-    // Fire-and-forget WhatsApp confirmation (do not block response if it fails)
+    // Fire-and-forget notifications (WhatsApp + Email)
     try {
-      const userPhone = booking.user?.phone;
+      const user = booking.user;
+
+      // Email Confirmation
+      if (user && user.email) {
+        emailService.sendBookingConfirmation(booking, user)
+          .catch(err => console.error('Failed to send booking email:', err));
+      }
+
+      // WhatsApp Confirmation (keep existing logic if intended)
+      const userPhone = user?.phone;
       if (userPhone) {
         // Ensure phone is in E.164 format (+91...) before using in production
         sendBookingConfirmationWhatsApp({
           toPhone: userPhone,
           booking,
-        });
+        }).catch(err => console.error('Failed to send WhatsApp:', err));
       } else {
         console.warn('Booking user has no phone number; skipping WhatsApp confirmation.');
       }
     } catch (notifyErr) {
-      console.error('Error scheduling WhatsApp confirmation:', notifyErr);
+      console.error('Error scheduling notifications:', notifyErr);
     }
 
     return res.status(200).json({

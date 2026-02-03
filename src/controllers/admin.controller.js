@@ -5,6 +5,7 @@ const {
   sendTaxiAssignmentWhatsApp,
   sendDriverAssignmentWhatsApp,
 } = require('../services/twilio.service');
+const emailService = require('../services/email.service');
 
 /**
  * Simple admin auth check using existing user/role model.
@@ -127,6 +128,12 @@ async function upsertAssignTaxi(req, res) {
         booking,
         assignment,
       });
+
+      // Send Email to Customer
+      if (booking.user && booking.user.email) {
+        await emailService.sendDriverAssignedEmail(booking, assignment, booking.user)
+          .catch(err => console.error('Failed to send driver assignment email:', err));
+      }
 
       await prisma.booking.update({
         where: { id: bookingId },

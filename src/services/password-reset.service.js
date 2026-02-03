@@ -1,7 +1,7 @@
 // src/services/password-reset.service.js
 const bcrypt = require('bcryptjs');
 const prisma = require('../config/prisma');
-const { sendPasswordResetOtpWhatsApp } = require('./twilio.service');
+const { sendOtpSms } = require('./sms.service');
 
 const PASSWORD_SALT_ROUNDS = 10;
 const OTP_SALT_ROUNDS = 10;
@@ -83,7 +83,7 @@ async function requestPasswordReset({ email, phone }) {
 
   console.log('🔔 Found user for password reset:', { id: user.id, phone: user.phone, email: user.email });
   const normalizedPhone = normalizeIndianPhone(user.phone);
-  console.log('🔔 Normalized phone for WhatsApp OTP:', normalizedPhone);
+  console.log('🔔 Normalized phone for SMS OTP:', normalizedPhone);
 
   const otp = generateOtp();
   const otpHash = await bcrypt.hash(otp, OTP_SALT_ROUNDS);
@@ -104,7 +104,7 @@ async function requestPasswordReset({ email, phone }) {
     toPhone: normalizedPhone,
   });
 
-  await sendPasswordResetOtpWhatsApp({
+  await sendOtpSms({
     toPhone: normalizedPhone,
     otp,
     expiryMinutes: OTP_TTL_MINUTES,
