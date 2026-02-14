@@ -10,11 +10,34 @@ const fleetRoutes = require('./routes/fleet.routes');
 
 const cors = require('cors');
 const app = express();
-app.use(cors());
-app.use(express.json());
 
-// Serve uploaded files statically
-app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
+// Trust proxy for rate limiting behind reverse proxy
+app.set('trust proxy', 1);
+
+// CORS configuration
+app.use(cors({
+  origin: process.env.FRONTEND_URL || '*',
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+}));
+
+// Parse JSON with size limit for security
+app.use(express.json({ limit: '10mb' }));
+
+// Response compression (gzip)
+app.use((req, res, next) => {
+  // Enable gzip compression for text-based responses
+  res.set('Content-Encoding', 'identity'); // Let browser handle
+  next();
+});
+
+// Serve uploaded files statically with caching
+app.use('/uploads', express.static(path.join(__dirname, '../uploads'), {
+  maxAge: '1d', // Cache for 1 day
+  etag: true,
+  lastModified: true,
+}));
 
 // Security Headers (Manual implementation of basic helmet features)
 app.use((req, res, next) => {
@@ -26,6 +49,42 @@ app.use((req, res, next) => {
   res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline';");
   next();
 });
+
+// Simple in-memory rate limiter
+const rateLimitStore = new Map();
+const RATE_LIMIT_WINDOW = 60 * 1000; // 1 minute
+const RATE_LIMIT_MAX = 100; // 100 requests per window
+
+const rateLimit = (req, res, next) => {
+  const ip = req.ip || req.connection.remoteAddress;
+  const now = Date.now();
+
+  if (!rateLimitStore.has(ip)) {
+    rateLimitStore.set(ip, { count: 1, resetTime: now + RATE_LIMIT_WINDOW });
+    return next();
+  }
+
+  const record = rateLimitStore.get(ip);
+
+  if (now > record.resetTime) {
+    record.count = 1;
+    record.resetTime = now + RATE_LIMIT_WINDOW;
+    return next();
+  }
+
+  if (record.count >= RATE_LIMIT_MAX) {
+    return res.status(429).json({
+      success: false,
+      message: 'Too many requests. Please try again later.'
+    });
+  }
+
+  record.count++;
+  next();
+};
+
+// Apply rate limiting to API routes
+app.use('/api', rateLimit);
 
 // Simple request logger to debug API traffic
 app.use((req, res, next) => {
@@ -67,4 +126,15 @@ app.use((err, req, res, next) => {
   res.status(status).json({ message });
 });
 
+// Cleanup rate limit store periodically
+setInterval(() => {
+  const now = Date.now();
+  for (const [ip, record] of rateLimitStore) {
+    if (now > record.resetTime + RATE_LIMIT_WINDOW) {
+      rateLimitStore.delete(ip);
+    }
+  }
+}, 5 * 60 * 1000); // Clean up every 5 minutes
+
 module.exports = app;
+

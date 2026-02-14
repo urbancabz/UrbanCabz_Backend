@@ -12,7 +12,10 @@ const getPricingSettings = async (req, res) => {
                     min_km_threshold: 100.0,
                     min_km_airport_apply: false,
                     min_km_oneway_apply: false,
-                    min_km_roundtrip_apply: false
+                    min_km_roundtrip_apply: false,
+                    service_airport_enabled: true,
+                    service_oneway_enabled: true,
+                    service_roundtrip_enabled: true
                 }
             });
         }
@@ -31,7 +34,10 @@ const updatePricingSettings = async (req, res) => {
             min_km_threshold,
             min_km_airport_apply,
             min_km_oneway_apply,
-            min_km_roundtrip_apply
+            min_km_roundtrip_apply,
+            service_airport_enabled,
+            service_oneway_enabled,
+            service_roundtrip_enabled
         } = req.body;
 
         // Find existing to update
@@ -44,7 +50,10 @@ const updatePricingSettings = async (req, res) => {
                     ...(min_km_threshold !== undefined && { min_km_threshold: parseFloat(min_km_threshold) }),
                     ...(min_km_airport_apply !== undefined && { min_km_airport_apply: !!min_km_airport_apply }),
                     ...(min_km_oneway_apply !== undefined && { min_km_oneway_apply: !!min_km_oneway_apply }),
-                    ...(min_km_roundtrip_apply !== undefined && { min_km_roundtrip_apply: !!min_km_roundtrip_apply })
+                    ...(min_km_roundtrip_apply !== undefined && { min_km_roundtrip_apply: !!min_km_roundtrip_apply }),
+                    ...(service_airport_enabled !== undefined && { service_airport_enabled: !!service_airport_enabled }),
+                    ...(service_oneway_enabled !== undefined && { service_oneway_enabled: !!service_oneway_enabled }),
+                    ...(service_roundtrip_enabled !== undefined && { service_roundtrip_enabled: !!service_roundtrip_enabled })
                 }
             });
         } else {
@@ -54,7 +63,10 @@ const updatePricingSettings = async (req, res) => {
                     min_km_threshold: min_km_threshold !== undefined ? parseFloat(min_km_threshold) : 100.0,
                     min_km_airport_apply: !!min_km_airport_apply,
                     min_km_oneway_apply: !!min_km_oneway_apply,
-                    min_km_roundtrip_apply: !!min_km_roundtrip_apply
+                    min_km_roundtrip_apply: !!min_km_roundtrip_apply,
+                    service_airport_enabled: service_airport_enabled !== undefined ? !!service_airport_enabled : true,
+                    service_oneway_enabled: service_oneway_enabled !== undefined ? !!service_oneway_enabled : true,
+                    service_roundtrip_enabled: service_roundtrip_enabled !== undefined ? !!service_roundtrip_enabled : true
                 }
             });
         }

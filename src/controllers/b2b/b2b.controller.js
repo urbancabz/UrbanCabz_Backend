@@ -666,6 +666,34 @@ const manageCompanyFleet = async (req, res) => {
 };
 
 /**
+ * @route   DELETE /api/b2b/fleet-assignment/:id
+ * @desc    Remove a vehicle assignment from a company
+ * @access  Private/Admin
+ */
+const removeCompanyFleet = async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        const assignment = await prisma.b2b_company_fleet.findUnique({
+            where: { id: parseInt(id) }
+        });
+
+        if (!assignment) {
+            return res.status(404).json({ success: false, message: 'Assignment not found' });
+        }
+
+        await prisma.b2b_company_fleet.delete({
+            where: { id: parseInt(id) }
+        });
+
+        res.json({ success: true, message: 'Vehicle removed from company fleet' });
+    } catch (error) {
+        console.error('Remove Company Fleet Error:', error);
+        res.status(500).json({ success: false, message: 'Failed to remove vehicle assignment' });
+    }
+};
+
+/**
  * @route   GET /api/b2b/my-fleet
  * @desc    Get fleet assigned to current user's company
  * @access  Private/B2B User
@@ -685,16 +713,29 @@ const getMyFleet = async (req, res) => {
         }
 
         // Fetch assigned fleet
+        console.log("[B2B Fleet] Fetching for company ID:", b2bUser.company.id);
+
         const assignedFleet = await prisma.b2b_company_fleet.findMany({
             where: {
                 company_id: b2bUser.company.id,
-                is_active: true,
-                vehicle: { is_active: true } // Ensure base vehicle is also active
+                is_active: true
             },
             include: {
                 vehicle: true
             }
         });
+
+        console.log("[B2B Fleet] Found vehicles:", assignedFleet.length);
+        if (assignedFleet.length === 0) {
+            // Debug: Check total assignments
+            const totalAssignments = await prisma.b2b_company_fleet.findMany({
+                where: { company_id: b2bUser.company.id }
+            });
+            console.log("[B2B Fleet] Total assignments (ignoring active):", totalAssignments.length);
+            totalAssignments.forEach(a => {
+                console.log(`  - Vehicle ID: ${a.fleet_vehicle_id}, is_active: ${a.is_active}`);
+            });
+        }
 
         // Transform to match public fleet structure but with custom price
         const vehicles = assignedFleet.map(item => ({
@@ -809,9 +850,15 @@ const recordCompanyPayment = async (req, res) => {
         const { company_id, amount, payment_mode, reference_no, notes } = req.body;
         const adminId = req.user?.id;
 
-        if (!company_id || !amount) {
-            return res.status(400).json({ success: false, message: 'Company and amount are required' });
-        }
+        const VALID_MODES = ['CASH', 'CHEQUE', 'UPI', 'BANK_TRANSFER', 'OTHER'];
+
+        if (!company_id) return res.status(400).json({ success: false, message: 'Company ID is required' });
+        if (!amount || isNaN(amount) || parseFloat(amount) <= 0) return res.status(400).json({ success: false, message: 'Amount must be a positive number' });
+        if (!payment_mode || !VALID_MODES.includes(payment_mode)) return res.status(400).json({ success: false, message: `Payment mode must be one of: ${VALID_MODES.join(', ')}` });
+
+        // Verify company exists
+        const company = await prisma.b2b_company.findUnique({ where: { id: parseInt(company_id) } });
+        if (!company) return res.status(404).json({ success: false, message: 'Company not found' });
 
         const payment = await prisma.b2b_payment.create({
             data: {
@@ -831,6 +878,128 @@ const recordCompanyPayment = async (req, res) => {
     }
 };
 
+/**
+ * @route   POST /api/b2b/companies
+ * @desc    Admin manually creates a new company + user
+ * @access  Private/Admin
+ */
+const createCompany = async (req, res) => {
+    try {
+        const { company_name, company_email, company_phone, address, city, state, pincode, gst_number } = req.body;
+
+        if (!company_name || !company_email || !company_phone) {
+            return res.status(400).json({ success: false, message: 'Company name, email, and phone are required' });
+        }
+
+        // Check if company email already exists
+        const existingCompany = await prisma.b2b_company.findUnique({ where: { company_email } });
+        if (existingCompany) {
+            return res.status(400).json({ success: false, message: 'Company with this email already exists' });
+        }
+
+        const result = await prisma.$transaction(async (tx) => {
+            // 1. Create company
+            const company = await tx.b2b_company.create({
+                data: {
+                    company_name,
+                    company_email,
+                    company_phone,
+                    address: address || null,
+                    city: city || null,
+                    state: state || null,
+                    pincode: pincode || null,
+                    gst_number: gst_number || null
+                }
+            });
+
+            // 2. Ensure B2B role exists
+            let b2bRole = await tx.role.findFirst({ where: { name: 'b2b_user' } });
+            if (!b2bRole) {
+                b2bRole = await tx.role.create({ data: { name: 'b2b_user' } });
+            }
+
+            // 3. Create or Update User
+            let user = await tx.user.findUnique({ where: { email: company_email } });
+            if (!user) {
+                const hashedPassword = await bcrypt.hash('UrbanCabz123', 10);
+                user = await tx.user.create({
+                    data: {
+                        email: company_email,
+                        name: company_name, // Default user name to company name
+                        phone: company_phone,
+                        role_id: b2bRole.id,
+                        is_first_login: true,
+                        password_hash: hashedPassword
+                    }
+                });
+            } else {
+                // If user exists, ensure they have B2B role if not admin
+                // (Strictly speaking we might want to be careful here, but for now we essentially 'upgrade' them or ensuring mapping)
+                if (user.role_id !== b2bRole.id) {
+                    // logic to handle existing users? 
+                    // For now, let's just proceed to link them.
+                }
+            }
+
+            // 4. Link User to Company
+            await tx.b2b_user.create({
+                data: {
+                    user_id: user.id,
+                    company_id: company.id,
+                    is_primary: true
+                }
+            });
+
+            return company;
+        });
+
+        res.status(201).json({ success: true, message: 'Company created manually', data: result });
+    } catch (error) {
+        console.error('Create Company Error:', error);
+        res.status(500).json({ success: false, message: 'Failed to create company' });
+    }
+};
+
+/**
+ * @route   PUT /api/b2b/companies/:id
+ * @desc    Admin updates company details
+ * @access  Private/Admin
+ */
+const updateCompany = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { company_name, company_email, company_phone, address, city, state, pincode, gst_number } = req.body;
+
+        const company = await prisma.b2b_company.findUnique({ where: { id: parseInt(id) } });
+        if (!company) return res.status(404).json({ success: false, message: 'Company not found' });
+
+        // If email is changing, check uniqueness
+        if (company_email && company_email !== company.company_email) {
+            const existing = await prisma.b2b_company.findUnique({ where: { company_email } });
+            if (existing) return res.status(400).json({ success: false, message: 'Email already in use by another company' });
+        }
+
+        const updated = await prisma.b2b_company.update({
+            where: { id: parseInt(id) },
+            data: {
+                company_name,
+                company_email,
+                company_phone,
+                address,
+                city,
+                state,
+                pincode,
+                gst_number
+            }
+        });
+
+        res.json({ success: true, message: 'Company details updated', data: updated });
+    } catch (error) {
+        console.error('Update Company Error:', error);
+        res.status(500).json({ success: false, message: 'Failed to update company' });
+    }
+};
+
 module.exports = {
     registerB2BRequest,
     getAllB2BRequests,
@@ -845,7 +1014,10 @@ module.exports = {
     getCompanies,
     getCompanyFleet,
     manageCompanyFleet,
+    removeCompanyFleet,
     getMyFleet,
     getCompanyBookingsForAdmin,
-    recordCompanyPayment
+    recordCompanyPayment,
+    createCompany,
+    updateCompany
 };

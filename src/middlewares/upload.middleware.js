@@ -15,18 +15,21 @@ const storage = new CloudinaryStorage({
     cloudinary: cloudinary,
     params: {
         folder: 'urban-cabz/fleet', // Folder in Cloudinary
-        allowed_formats: ['jpg', 'png', 'jpeg', 'webp'],
+        allowed_formats: ['jpg', 'png', 'jpeg', 'webp', 'gif', 'avif'],
         transformation: [{ width: 1000, crop: "limit" }] // Optional resizing
     }
 });
 
 // File filter - only allow images
 const fileFilter = (req, file, cb) => {
-    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/jpg', 'image/avif'];
+    console.log(`📂 Processing upload: ${file.originalname} (${file.mimetype})`);
+
     if (allowedTypes.includes(file.mimetype)) {
         cb(null, true);
     } else {
-        cb(new Error('Only image files (JPEG, PNG, WebP, GIF) are allowed'), false);
+        console.error(`❌ Rejected file type: ${file.mimetype}`);
+        cb(new Error(`Only image files are allowed. Received: ${file.mimetype}`), false);
     }
 };
 

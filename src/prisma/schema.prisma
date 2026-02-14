@@ -390,5 +390,10 @@ model pricing_settings {
   min_km_oneway_apply    Boolean  @default(false)
   min_km_roundtrip_apply Boolean  @default(false)
   
+  // Service visibility toggles (admin can disable services globally)
+  service_airport_enabled   Boolean  @default(true)
+  service_oneway_enabled    Boolean  @default(true)
+  service_roundtrip_enabled Boolean  @default(true)
+  
   updated_at             DateTime @updatedAt @db.Timestamptz(6)
 }

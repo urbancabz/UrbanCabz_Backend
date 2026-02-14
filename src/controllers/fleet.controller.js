@@ -139,10 +139,9 @@ const deleteFleetVehicle = async (req, res) => {
             return res.status(404).json({ success: false, message: 'Vehicle not found' });
         }
 
-        // Soft delete - just mark as inactive
-        const vehicle = await prisma.fleet_vehicle.update({
-            where: { id: parseInt(id) },
-            data: { is_active: false }
+        // Hard delete - actually remove the record
+        const vehicle = await prisma.fleet_vehicle.delete({
+            where: { id: parseInt(id) }
         });
 
         // Log audit trail

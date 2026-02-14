@@ -25,7 +25,16 @@ router.get('/companies', requireAuth, requireAdmin, b2bController.getCompanies);
 router.get('/companies/:id/fleet', requireAuth, requireAdmin, b2bController.getCompanyFleet);
 router.post('/companies/:id/fleet', requireAuth, requireAdmin, b2bController.manageCompanyFleet);
 router.get('/companies/:id/bookings', requireAuth, requireAdmin, b2bController.getCompanyBookingsForAdmin);
+router.post('/companies/:id/fleet', requireAuth, requireAdmin, b2bController.manageCompanyFleet);
+router.get('/companies/:id/bookings', requireAuth, requireAdmin, b2bController.getCompanyBookingsForAdmin);
+
+// Validated payment recording
 router.post('/payments', requireAuth, requireAdmin, b2bController.recordCompanyPayment);
+
+// Company CRUD (Admin)
+router.post('/companies', requireAuth, requireAdmin, b2bController.createCompany);
+router.put('/companies/:id', requireAuth, requireAdmin, b2bController.updateCompany);
+router.delete('/fleet-assignment/:id', requireAuth, requireAdmin, b2bController.removeCompanyFleet);
 
 // Company Fleet (B2B User)
 router.get('/my-fleet', requireAuth, b2bController.getMyFleet);

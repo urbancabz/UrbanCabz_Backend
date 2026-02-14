@@ -141,6 +141,14 @@ router.put(
 );
 router.delete('/drivers/:id', requireAuth, requireAdmin, driverController.deleteDriver);
 
+const userController = require('../controllers/user.controller');
+
+// ===================== CUSTOMER MANAGEMENT ROUTES =====================
+router.get('/users', requireAuth, requireAdmin, userController.listUsers);
+router.get('/users/:id', requireAuth, requireAdmin, userController.getUserById);
+router.put('/users/:id', requireAuth, requireAdmin, userController.updateUser);
+router.get('/users/:id/bookings', requireAuth, requireAdmin, userController.getUserBookings);
+
 module.exports = router;
 
 

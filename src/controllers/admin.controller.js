@@ -387,10 +387,12 @@ async function upsertB2BAssignTaxi(req, res) {
 /**
  * Mark a B2B booking as paid (offline payment)
  */
+// Mark B2B bill as paid (offline)
 async function markB2BBillPaid(req, res) {
   try {
     const bookingId = parseInt(req.params.bookingId, 10);
-    const { mode, remarks } = req.body;
+    // mode and remarks were unused/invalid in schema, ignoring them for now or logging them if needed
+    // const { mode, remarks } = req.body; 
 
     const booking = await prisma.b2b_booking.findUnique({
       where: { id: bookingId }
@@ -403,9 +405,7 @@ async function markB2BBillPaid(req, res) {
     const updated = await prisma.b2b_booking.update({
       where: { id: bookingId },
       data: {
-        status: 'PAID',
-        payment_mode: mode,
-        payment_remarks: remarks
+        status: 'PAID'
       }
     });
 
