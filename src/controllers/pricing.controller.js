@@ -1,9 +1,19 @@
 const prisma = require('../config/prisma');
+const cache = require('../utils/cache');
 
-// Get Global Pricing Settings
+const PRICING_CACHE_KEY = 'pricing_settings';
+const PRICING_CACHE_TTL = 5 * 60; // 5 minutes in seconds
+
+// Get Global Pricing Settings (cached - avoids DB hit on every page load)
 const getPricingSettings = async (req, res) => {
     try {
-        // Fetch first row, or create default if not exists
+        // Try to serve from cache first
+        const cached = cache.get(PRICING_CACHE_KEY);
+        if (cached) {
+            return res.json({ success: true, data: cached });
+        }
+
+        // Cache miss - fetch from DB
         let settings = await prisma.pricing_settings.findFirst();
 
         if (!settings) {
@@ -19,6 +29,9 @@ const getPricingSettings = async (req, res) => {
                 }
             });
         }
+
+        // Store in cache for next 5 minutes
+        cache.set(PRICING_CACHE_KEY, settings, PRICING_CACHE_TTL);
 
         res.json({ success: true, data: settings });
     } catch (error) {
@@ -57,7 +70,6 @@ const updatePricingSettings = async (req, res) => {
                 }
             });
         } else {
-            // Should verify rare edge case where it doesn't exist
             settings = await prisma.pricing_settings.create({
                 data: {
                     min_km_threshold: min_km_threshold !== undefined ? parseFloat(min_km_threshold) : 100.0,
@@ -71,7 +83,10 @@ const updatePricingSettings = async (req, res) => {
             });
         }
 
-        // Log audit (optional but good)
+        // Invalidate the cache so the next GET fetches fresh data from DB
+        cache.invalidate(PRICING_CACHE_KEY);
+
+        // Log audit
         await prisma.audit_log.create({
             data: {
                 entity_type: 'PRICING',
