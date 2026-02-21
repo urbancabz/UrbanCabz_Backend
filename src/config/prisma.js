@@ -109,14 +109,11 @@ process.on('SIGTERM', async () => {
 
 // ═══════════════════════════════════════════════════════════════
 // HEARTBEAT — Prevents silent TCP drops by cross-region NAT firewalls
-// Touches ALL connections in the pool every 2 minutes
+// Single lightweight ping every 2 minutes (NOT all connections at once —
+// that saturated the pool and blocked real user queries)
 // ═══════════════════════════════════════════════════════════════
 const heartbeatInterval = setInterval(() => {
-    Promise.allSettled(
-        Array.from({ length: CONNECTION_LIMIT }).map(() =>
-            basePrisma.$queryRawUnsafe('SELECT 1')
-        )
-    ).catch(() => { });
+    basePrisma.$queryRawUnsafe('SELECT 1').catch(() => { });
 }, 2 * 60 * 1000);
 
 if (heartbeatInterval.unref) heartbeatInterval.unref();
