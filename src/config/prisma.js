@@ -20,10 +20,22 @@ const basePrisma = new PrismaClient({
 
 // ═══════════════════════════════════════════════════════════════
 // GLOBAL RETRY via $extends — Auto-retries ALL queries on P2024
-// Prisma v6 uses $extends instead of $use middleware
+// IMPORTANT: We do NOT call $disconnect/$connect in the retry loop!
+// That tears down the entire engine and kills all in-flight queries.
+// Instead, we just wait with exponential backoff and let Prisma's
+// internal pool naturally recover stale connections.
 // ═══════════════════════════════════════════════════════════════
-const RETRYABLE_CODES = new Set(['P2024', 'P2010', 'P1017', 'P1001', 'P1002']);
 const MAX_RETRIES = 3;
+
+function isRetryableError(error) {
+    const code = error?.code || error?.errorCode;
+    if (['P2024', 'P2010', 'P1017', 'P1001', 'P1002'].includes(code)) return true;
+    const name = error?.constructor?.name || '';
+    if (name === 'PrismaClientInitializationError') return true;
+    const msg = error?.message || '';
+    if (msg.includes('connection pool') || msg.includes('Engine is not yet connected')) return true;
+    return false;
+}
 
 async function retryOperation(operation, args, query) {
     let lastError;
@@ -32,29 +44,14 @@ async function retryOperation(operation, args, query) {
             return await query(args);
         } catch (error) {
             lastError = error;
-            const code = error?.code || error?.errorCode;
-            const isRetryable = RETRYABLE_CODES.has(code) ||
-                error?.constructor?.name === 'PrismaClientInitializationError' ||
-                (error?.message && error.message.includes('connection pool'));
-
-            if (!isRetryable || attempt === MAX_RETRIES) {
+            if (!isRetryableError(error) || attempt === MAX_RETRIES) {
                 throw error;
             }
-
-            const delay = Math.min(500 * Math.pow(2, attempt - 1), 4000);
+            const delay = Math.min(1000 * attempt, 5000); // 1s, 2s, 3s
             console.warn(
-                `⚠️  Prisma retry ${attempt}/${MAX_RETRIES} | ${operation} | wait ${delay}ms | ${code || error.constructor?.name}`
+                `⚠️  Prisma retry ${attempt}/${MAX_RETRIES} | ${operation} | wait ${delay}ms | ${error?.constructor?.name}`
             );
-
             await new Promise(r => setTimeout(r, delay));
-
-            // Force-reconnect to kill stale TCP connections
-            try {
-                await basePrisma.$disconnect();
-                await basePrisma.$connect();
-            } catch (reconnectErr) {
-                console.warn('⚠️  Reconnect failed:', reconnectErr.message);
-            }
         }
     }
     throw lastError;
@@ -89,21 +86,10 @@ async function withRetry(fn, maxRetries = 3) {
             return await fn();
         } catch (error) {
             lastError = error;
-            const code = error?.code || error?.errorCode;
-            const isRetryable = RETRYABLE_CODES.has(code) ||
-                error?.constructor?.name === 'PrismaClientInitializationError' ||
-                (error?.message && error.message.includes('connection pool'));
-
-            if (!isRetryable || attempt === maxRetries) throw error;
-
-            const delay = Math.min(500 * Math.pow(2, attempt - 1), 4000);
+            if (!isRetryableError(error) || attempt === maxRetries) throw error;
+            const delay = Math.min(1000 * attempt, 5000);
             console.warn(`⚠️  withRetry ${attempt}/${maxRetries} after ${delay}ms`);
             await new Promise(r => setTimeout(r, delay));
-
-            try {
-                await basePrisma.$disconnect();
-                await basePrisma.$connect();
-            } catch (_) { }
         }
     }
     throw lastError;
