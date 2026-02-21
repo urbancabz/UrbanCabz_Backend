@@ -21,4 +21,14 @@ process.on('SIGTERM', async () => {
     process.exit(0);
 });
 
+// HEARTBEAT: Prevent silent TCP connection drops by cross-region NAT firewalls (Render SG -> Supabase IN)
+// This aggressively touches up to 5 connections in the pool every 2 minutes.
+setInterval(() => {
+    Promise.allSettled(
+        Array.from({ length: 5 }).map(() =>
+            prisma.$queryRawUnsafe('SELECT 1')
+        )
+    ).catch(() => { });
+}, 2 * 60 * 1000); // 2 minutes
+
 module.exports = prisma;
