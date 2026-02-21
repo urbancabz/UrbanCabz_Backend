@@ -1,6 +1,5 @@
 // Script to clean all booking-related data
-const { PrismaClient } = require('@prisma/client');
-const prisma = new PrismaClient();
+const prisma = require('../config/prisma');
 
 async function cleanBookingData() {
     console.log('🧹 Starting cleanup of all booking-related data...\n');

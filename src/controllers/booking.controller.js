@@ -21,8 +21,7 @@ async function getMyBookings(req, res) {
 async function getCompanyBookings(req, res) {
   try {
     const userId = req.user.id;
-    const { PrismaClient } = require('@prisma/client');
-    const prisma = new PrismaClient();
+    const prisma = require('../config/prisma');
 
     // Find the company this user belongs to
     const b2bUser = await prisma.b2b_user.findFirst({

@@ -128,8 +128,7 @@ async function b2bLogin(req, res) {
     const { email, password } = req.body;
 
     // Get user and check if they exist
-    const { PrismaClient } = require('@prisma/client');
-    const prisma = new PrismaClient();
+    const prisma = require('../config/prisma');
 
     const user = await prisma.user.findUnique({
       where: { email },
@@ -190,8 +189,7 @@ async function b2bSetPassword(req, res) {
 
     const { email, password } = req.body;
 
-    const { PrismaClient } = require('@prisma/client');
-    const prisma = new PrismaClient();
+    const prisma = require('../config/prisma');
 
     const user = await prisma.user.findUnique({
       where: { email },
