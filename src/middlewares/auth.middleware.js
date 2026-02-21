@@ -1,6 +1,7 @@
 // src/middlewares/auth.middleware.js
 const { verifyToken } = require('../utils/jwt');
 const prisma = require('../config/prisma');
+const { withRetry } = require('../config/prisma');
 
 async function requireAuth(req, res, next) {
   try {
@@ -9,7 +10,11 @@ async function requireAuth(req, res, next) {
 
     const token = auth.split(' ')[1];
     const payload = verifyToken(token); // throws if invalid
-    const user = await prisma.user.findUnique({ where: { id: payload.userId }, include: { role: true } });
+
+    // Wrapped in withRetry to survive transient P2024 pool exhaustion
+    const user = await withRetry(() =>
+      prisma.user.findUnique({ where: { id: payload.userId }, include: { role: true } })
+    );
     if (!user) return res.status(401).json({ message: 'Unauthorized' });
 
     req.user = {
@@ -19,6 +24,12 @@ async function requireAuth(req, res, next) {
     };
     return next();
   } catch (err) {
+    // Distinguish DB errors from auth errors
+    const code = err?.code || err?.errorCode;
+    if (code === 'P2024' || code === 'P2010' || code === 'P1017' || code === 'P1001') {
+      console.error('🔴 Auth middleware DB unavailable:', err.message);
+      return res.status(503).json({ message: 'Service temporarily unavailable. Please try again.' });
+    }
     console.error('auth middleware err', err);
     return res.status(401).json({ message: 'Invalid token' });
   }
@@ -32,8 +43,6 @@ function requireRole(roles = []) {
     }
     const userRole = (req.user.role || '').toUpperCase();
     const allowed = roles.map((r) => r.toUpperCase());
-
-    // console.log(`🛡️ requireRole Check: User=${req.user.email} Role=${userRole} Allowed=${allowed}`);
 
     if (!allowed.includes(userRole)) {
       console.warn(`⛔ Forbidden: User role '${userRole}' not in [${allowed}]`);
