@@ -33,6 +33,11 @@ const getPricingSettings = async (req, res) => {
         // Store in cache for next 5 minutes
         cache.set(PRICING_CACHE_KEY, settings, PRICING_CACHE_TTL);
 
+        // Prevent BROWSER caching so dynamic frontend mounting always gets the real DB toggle state
+        res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+        res.setHeader('Pragma', 'no-cache');
+        res.setHeader('Expires', '0');
+
         res.json({ success: true, data: settings });
     } catch (error) {
         console.error('Error fetching pricing settings:', error);
