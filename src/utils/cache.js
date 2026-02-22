@@ -11,6 +11,7 @@
  */
 
 const store = new Map();
+const inFlight = new Map(); // Tracks ongoing promises to prevent Cache Stampede
 
 /**
  * Store a value in the cache.
@@ -41,6 +42,35 @@ function get(key) {
 }
 
 /**
+ * Retrieve a value from the cache, OR run the fetch function if missing.
+ * Prevents multiple concurrent requests from hitting the DB identically (Cache Stampede).
+ */
+async function getOrSet(key, fetchFn, ttlSeconds = 300) {
+    // 1. Check if already cached
+    const cached = get(key);
+    if (cached !== null) return cached;
+
+    // 2. Check if a request is already in-flight for this key
+    if (inFlight.has(key)) {
+        return await inFlight.get(key);
+    }
+
+    // 3. Otherwise, create the Promise and track it
+    const promise = (async () => {
+        try {
+            const result = await fetchFn();
+            set(key, result, ttlSeconds);
+            return result;
+        } finally {
+            inFlight.delete(key);
+        }
+    })();
+
+    inFlight.set(key, promise);
+    return await promise;
+}
+
+/**
  * Explicitly remove a cached item (e.g. after an admin update).
  * @param {string} key
  */
@@ -53,6 +83,7 @@ function invalidate(key) {
  */
 function flush() {
     store.clear();
+    inFlight.clear();
 }
 
-module.exports = { set, get, invalidate, flush };
+module.exports = { set, get, getOrSet, invalidate, flush };

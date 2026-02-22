@@ -7,31 +7,29 @@ const PRICING_CACHE_TTL = 5 * 60; // 5 minutes in seconds
 // Get Global Pricing Settings (cached - avoids DB hit on every page load)
 const getPricingSettings = async (req, res) => {
     try {
-        // Try to serve from cache first
-        const cached = cache.get(PRICING_CACHE_KEY);
-        if (cached) {
-            return res.json({ success: true, data: cached });
-        }
+        // getOrSet prevents Cache Stampedes by only allowing 1 concurrent DB query
+        const settings = await cache.getOrSet(
+            PRICING_CACHE_KEY,
+            async () => {
+                let dbSettings = await prisma.pricing_settings.findFirst();
 
-        // Cache miss - fetch from DB
-        let settings = await prisma.pricing_settings.findFirst();
-
-        if (!settings) {
-            settings = await prisma.pricing_settings.create({
-                data: {
-                    min_km_threshold: 100.0,
-                    min_km_airport_apply: false,
-                    min_km_oneway_apply: false,
-                    min_km_roundtrip_apply: false,
-                    service_airport_enabled: true,
-                    service_oneway_enabled: true,
-                    service_roundtrip_enabled: true
+                if (!dbSettings) {
+                    dbSettings = await prisma.pricing_settings.create({
+                        data: {
+                            min_km_threshold: 100.0,
+                            min_km_airport_apply: false,
+                            min_km_oneway_apply: false,
+                            min_km_roundtrip_apply: false,
+                            service_airport_enabled: true,
+                            service_oneway_enabled: true,
+                            service_roundtrip_enabled: true
+                        }
+                    });
                 }
-            });
-        }
-
-        // Store in cache for next 5 minutes
-        cache.set(PRICING_CACHE_KEY, settings, PRICING_CACHE_TTL);
+                return dbSettings;
+            },
+            PRICING_CACHE_TTL
+        );
 
         // Prevent BROWSER caching so dynamic frontend mounting always gets the real DB toggle state
         res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');

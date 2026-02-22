@@ -15,32 +15,34 @@ async function requireAuth(req, res, next) {
     const payload = verifyToken(token); // throws if invalid
 
     const cacheKey = `auth_user_${payload.userId}`;
-    let cachedUser = cache.get(cacheKey);
 
-    if (cachedUser) {
-      req.user = cachedUser;
-      return next();
-    }
+    // getOrSet prevents Cache Stampedes by only allowing 1 concurrent DB query per user,
+    // while all other concurrent requests await that same Promise.
+    const reqUser = await cache.getOrSet(
+      cacheKey,
+      async () => {
+        // Wrapped in withRetry to survive transient P2024 pool exhaustion
+        const user = await withRetry(() =>
+          prisma.user.findUnique({ where: { id: payload.userId }, include: { role: true } })
+        );
 
-    // Wrapped in withRetry to survive transient P2024 pool exhaustion
-    const user = await withRetry(() =>
-      prisma.user.findUnique({ where: { id: payload.userId }, include: { role: true } })
+        if (!user) throw new Error('UnauthorizedUserFetch');
+
+        return {
+          id: user.id,
+          email: user.email,
+          role: user.role?.name || null
+        };
+      },
+      AUTH_CACHE_TTL
     );
 
-    if (!user) return res.status(401).json({ message: 'Unauthorized' });
-
-    const reqUser = {
-      id: user.id,
-      email: user.email,
-      role: user.role?.name || null
-    };
-
-    // Store in cache
-    cache.set(cacheKey, reqUser, AUTH_CACHE_TTL);
     req.user = reqUser;
-
     return next();
   } catch (err) {
+    if (err.message === 'UnauthorizedUserFetch') {
+      return res.status(401).json({ message: 'Unauthorized' });
+    }
     // Distinguish JWT errors from DB/Server errors
     if (err.name === 'JsonWebTokenError' || err.name === 'TokenExpiredError' || err.name === 'NotBeforeError') {
       return res.status(401).json({ message: 'Invalid token' });
