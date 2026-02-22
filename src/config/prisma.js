@@ -22,7 +22,7 @@ function hardenDatabaseUrl(url) {
     // Only use pgbouncer=true if specifically using port 6543 (Supabase connection pooler)
     const isPgBouncer = cleanUrl.includes(':6543') ? '&pgbouncer=true' : '';
 
-    return `${cleanUrl}${separator}connection_limit=20&pool_timeout=30&connect_timeout=30${isPgBouncer}`;
+    return `${cleanUrl}${separator}connection_limit=5&pool_timeout=30&connect_timeout=30${isPgBouncer}`;
 }
 
 const productionUrl = hardenDatabaseUrl(process.env.DATABASE_URL);
@@ -141,8 +141,8 @@ process.on('SIGTERM', async () => {
 // ═══════════════════════════════════════════════════════════════
 const concurrencyLimiter = require('../middlewares/concurrency.middleware');
 const heartbeatInterval = setInterval(() => {
-    // Skip heartbeat if pool is under pressure (15+ active requests out of 20 max)
-    if (concurrencyLimiter.getActiveCount && concurrencyLimiter.getActiveCount() >= 15) {
+    // Skip heartbeat if pool is under pressure (3+ active requests out of 5 max)
+    if (concurrencyLimiter.getActiveCount && concurrencyLimiter.getActiveCount() >= 3) {
         return;
     }
     basePrisma.$queryRawUnsafe('SELECT 1').catch(() => { });

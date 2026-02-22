@@ -29,26 +29,17 @@ async function getDashboardSync(req, res) {
     const dashboardData = await cache.getOrSet(
       cacheKey,
       async () => {
-        // Run essential summary queries in parallel
-        const [
-          totalBookings,
-          completedBookings,
-          pendingBookings,
-          b2bBookings,
-          recentUsers,
-          activeDrivers
-        ] = await Promise.all([
-          prisma.booking.count(),
-          prisma.booking.count({ where: { status: 'COMPLETED' } }),
-          prisma.booking.count({ where: { status: 'IN_PROGRESS' } }),
-          prisma.b2b_booking.count(),
-          prisma.user.findMany({
-            take: 5,
-            orderBy: { created_at: 'desc' },
-            select: { id: true, name: true, email: true, created_at: true }
-          }),
-          prisma.driver.count({ where: { status: 'ACTIVE' } })
-        ]);
+        // Run essential summary queries strictly sequentially to ensure exactly 1 connection per active request
+        const totalBookings = await prisma.booking.count();
+        const completedBookings = await prisma.booking.count({ where: { status: 'COMPLETED' } });
+        const pendingBookings = await prisma.booking.count({ where: { status: 'IN_PROGRESS' } });
+        const b2bBookings = await prisma.b2b_booking.count();
+        const recentUsers = await prisma.user.findMany({
+          take: 5,
+          orderBy: { created_at: 'desc' },
+          select: { id: true, name: true, email: true, created_at: true }
+        });
+        const activeDrivers = await prisma.driver.count({ where: { status: 'ACTIVE' } });
 
         return {
           stats: {

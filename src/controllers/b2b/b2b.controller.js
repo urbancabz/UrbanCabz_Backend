@@ -634,37 +634,35 @@ const getDashboardSync = async (req, res) => {
 
         const companyId = b2bUser.company.id;
 
-        // 2. Fetch dependencies in parallel to minimize overall connection hold time
-        const [bookingsRes, paymentsRes, fleetRes] = await Promise.all([
-            // Bookings (Cached)
-            cache.getOrSet(
-                `company_bookings_${companyId}`,
-                async () => await prisma.b2b_booking.findMany({
-                    where: { company_id: companyId },
-                    orderBy: { created_at: 'desc' },
-                    include: { bookedByUser: { select: { id: true, name: true, email: true } }, assignments: true },
-                    take: 50
-                }),
-                B2B_CACHE_TTL
-            ),
+        // 2. Fetch dependencies purely sequentially to strictly bound DB connection concurrency to 1 per request
+        // Bookings (Cached)
+        const bookingsRes = await cache.getOrSet(
+            `company_bookings_${companyId}`,
+            async () => await prisma.b2b_booking.findMany({
+                where: { company_id: companyId },
+                orderBy: { created_at: 'desc' },
+                include: { bookedByUser: { select: { id: true, name: true, email: true } }, assignments: true },
+                take: 50
+            }),
+            B2B_CACHE_TTL
+        );
 
-            // Payments (Cached)
-            cache.getOrSet(
-                `company_payments_${companyId}`,
-                async () => await prisma.b2b_payment.findMany({
-                    where: { company_id: companyId },
-                    orderBy: { paid_at: 'desc' },
-                    take: 50
-                }),
-                B2B_CACHE_TTL
-            ),
+        // Payments (Cached)
+        const paymentsRes = await cache.getOrSet(
+            `company_payments_${companyId}`,
+            async () => await prisma.b2b_payment.findMany({
+                where: { company_id: companyId },
+                orderBy: { paid_at: 'desc' },
+                take: 50
+            }),
+            B2B_CACHE_TTL
+        );
 
-            // Fleet (Live, small query)
-            prisma.b2b_company_fleet.findMany({
-                where: { company_id: companyId, is_active: true },
-                include: { vehicle: true }
-            })
-        ]);
+        // Fleet (Live, small query)
+        const fleetRes = await prisma.b2b_company_fleet.findMany({
+            where: { company_id: companyId, is_active: true },
+            include: { vehicle: true }
+        });
 
         // 3. Calculate lightweight billing summary locally without extra DB hits
         let totalBilled = 0;
