@@ -1,4 +1,8 @@
 const prisma = require('../config/prisma');
+const cache = require('../utils/cache');
+
+const FLEET_CACHE_TTL = 65; // 65 seconds
+const FLEET_CACHE_KEY_BASE = 'fleet_vehicles';
 
 // ===================== FLEET VEHICLE CRUD =====================
 
@@ -6,12 +10,19 @@ const prisma = require('../config/prisma');
 const getFleetVehicles = async (req, res) => {
     try {
         const { activeOnly } = req.query;
-        const where = activeOnly === 'true' ? { is_active: true } : {};
+        const cacheKey = `${FLEET_CACHE_KEY_BASE}_${activeOnly || 'all'}`;
 
-        const vehicles = await prisma.fleet_vehicle.findMany({
-            where,
-            orderBy: { category: 'asc' }
-        });
+        const vehicles = await cache.getOrSet(
+            cacheKey,
+            async () => {
+                const where = activeOnly === 'true' ? { is_active: true } : {};
+                return await prisma.fleet_vehicle.findMany({
+                    where,
+                    orderBy: { category: 'asc' }
+                });
+            },
+            FLEET_CACHE_TTL
+        );
 
         res.json({ success: true, data: { vehicles } });
     } catch (error) {
@@ -75,6 +86,10 @@ const createFleetVehicle = async (req, res) => {
             }
         });
 
+        // Invalidate fleet cache
+        cache.invalidate(`${FLEET_CACHE_KEY_BASE}_all`);
+        cache.invalidate(`${FLEET_CACHE_KEY_BASE}_true`);
+
         res.status(201).json({ success: true, data: { vehicle }, message: 'Vehicle created successfully' });
     } catch (error) {
         console.error('Error creating vehicle:', error);
@@ -122,6 +137,10 @@ const updateFleetVehicle = async (req, res) => {
             }
         });
 
+        // Invalidate fleet cache
+        cache.invalidate(`${FLEET_CACHE_KEY_BASE}_all`);
+        cache.invalidate(`${FLEET_CACHE_KEY_BASE}_true`);
+
         res.json({ success: true, data: { vehicle }, message: 'Vehicle updated successfully' });
     } catch (error) {
         console.error('Error updating vehicle:', error);
@@ -155,6 +174,10 @@ const deleteFleetVehicle = async (req, res) => {
                 reason: 'Vehicle deactivated from fleet'
             }
         });
+
+        // Invalidate fleet cache
+        cache.invalidate(`${FLEET_CACHE_KEY_BASE}_all`);
+        cache.invalidate(`${FLEET_CACHE_KEY_BASE}_true`);
 
         res.json({ success: true, message: 'Vehicle deactivated successfully' });
     } catch (error) {
