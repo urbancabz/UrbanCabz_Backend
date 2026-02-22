@@ -93,6 +93,8 @@ app.use((req, res, next) => {
 });
 
 // API versioning prefix
+const concurrencyLimiter = require('./middlewares/concurrency.middleware');
+app.use('/api', concurrencyLimiter); // Cap concurrent DB-hitting requests
 app.use('/api/v1/auth', authRoutes);
 app.use('/api/v1/bookings', bookingRoutes);
 app.use('/api/v1/payments', paymentRoutes);
