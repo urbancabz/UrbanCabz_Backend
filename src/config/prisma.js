@@ -129,10 +129,17 @@ process.on('SIGTERM', async () => {
 // HEARTBEAT — Prevents Supabase PgBouncer from killing idle connections.
 // Supabase drops idle connections after ~60 seconds.
 // Ping every 30 seconds to keep at least one connection alive.
+// POOL-AWARE: Skip the ping if the pool is under pressure to avoid
+// competing with real requests during load spikes.
 // ═══════════════════════════════════════════════════════════════
+const concurrencyLimiter = require('../middlewares/concurrency.middleware');
 const heartbeatInterval = setInterval(() => {
+    // Skip heartbeat if pool is under pressure (3+ active requests out of 4 max)
+    if (concurrencyLimiter.getActiveCount && concurrencyLimiter.getActiveCount() >= 3) {
+        return;
+    }
     basePrisma.$queryRawUnsafe('SELECT 1').catch(() => { });
-}, 30 * 1000); // 30 seconds (was 2 minutes - too slow for Supabase)
+}, 30 * 1000); // 30 seconds
 
 if (heartbeatInterval.unref) heartbeatInterval.unref();
 

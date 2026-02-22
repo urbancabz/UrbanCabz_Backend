@@ -1,5 +1,8 @@
 // src/controllers/admin.controller.js
 const prisma = require('../config/prisma');
+const cache = require('../utils/cache');
+
+const BOOKINGS_CACHE_TTL = 30; // 30 seconds — fresh enough for dispatch, saves pool slots
 const { validationResult } = require('express-validator');
 const {
   sendTaxiAssignmentWhatsApp,
@@ -17,15 +20,24 @@ async function me(req, res) {
 
 async function listPaidBookings(req, res) {
   try {
-    const bookings = await prisma.booking.findMany({
-      orderBy: { created_at: 'desc' },
-      include: {
-        user: true,
-        payments: true,
-        assign_taxis: true,
+    const limit = req.query.limit ? parseInt(req.query.limit) : 100;
+    const cacheKey = `admin_bookings_${limit}`;
+
+    const bookings = await cache.getOrSet(
+      cacheKey,
+      async () => {
+        return await prisma.booking.findMany({
+          orderBy: { created_at: 'desc' },
+          include: {
+            user: true,
+            payments: true,
+            assign_taxis: true,
+          },
+          take: limit
+        });
       },
-      take: req.query.limit ? parseInt(req.query.limit) : 100 // Prevent fetching 10,000s of rows
-    });
+      BOOKINGS_CACHE_TTL
+    );
 
     return res.json({ bookings });
   } catch (err) {
@@ -129,6 +141,9 @@ async function upsertAssignTaxi(req, res) {
       });
     }
 
+    // Invalidate booking cache so next poll gets fresh data
+    cache.invalidate(`admin_bookings_100`);
+
     return res.status(200).json({
       message: 'Taxi assignment saved successfully',
       assignment,
@@ -208,6 +223,7 @@ async function getCancelledBookings(req, res) {
         user: true,
         payments: true,
       },
+      take: req.query.limit ? parseInt(req.query.limit) : 50
     });
 
     return res.json({ bookings });
@@ -250,17 +266,26 @@ async function getPendingPayments(req, res) {
  */
 async function listB2BBookings(req, res) {
   try {
-    const bookings = await prisma.b2b_booking.findMany({
-      orderBy: { created_at: 'desc' },
-      include: {
-        company: true,
-        bookedByUser: {
-          select: { id: true, name: true, email: true, phone: true }
-        },
-        assignments: true,
+    const limit = req.query.limit ? parseInt(req.query.limit) : 50;
+    const cacheKey = `admin_b2b_bookings_${limit}`;
+
+    const bookings = await cache.getOrSet(
+      cacheKey,
+      async () => {
+        return await prisma.b2b_booking.findMany({
+          orderBy: { created_at: 'desc' },
+          include: {
+            company: true,
+            bookedByUser: {
+              select: { id: true, name: true, email: true, phone: true }
+            },
+            assignments: true,
+          },
+          take: limit
+        });
       },
-      take: req.query.limit ? parseInt(req.query.limit) : 50
-    });
+      BOOKINGS_CACHE_TTL
+    );
 
     return res.json({ bookings });
   } catch (err) {
@@ -331,6 +356,9 @@ async function upsertB2BAssignTaxi(req, res) {
         taxi_assign_status: 'ASSIGNED'
       },
     });
+
+    // Invalidate B2B booking cache so next poll gets fresh data
+    cache.invalidate(`admin_b2b_bookings_50`);
 
     return res.status(200).json({
       success: true,

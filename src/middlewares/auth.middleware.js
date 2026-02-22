@@ -1,7 +1,6 @@
 // src/middlewares/auth.middleware.js
 const { verifyToken } = require('../utils/jwt');
 const prisma = require('../config/prisma');
-const { withRetry } = require('../config/prisma');
 const cache = require('../utils/cache');
 
 const AUTH_CACHE_TTL = 60; // Cache valid users for 60 seconds
@@ -18,13 +17,15 @@ async function requireAuth(req, res, next) {
 
     // getOrSet prevents Cache Stampedes by only allowing 1 concurrent DB query per user,
     // while all other concurrent requests await that same Promise.
+    // No retry wrapper — under pool pressure, fail fast with 503 instead of
+    // holding a pool slot for 6+ seconds of backoff retries.
     const reqUser = await cache.getOrSet(
       cacheKey,
       async () => {
-        // Wrapped in withRetry to survive transient P2024 pool exhaustion
-        const user = await withRetry(() =>
-          prisma.user.findUnique({ where: { id: payload.userId }, include: { role: true } })
-        );
+        const user = await prisma.user.findUnique({
+          where: { id: payload.userId },
+          include: { role: true }
+        });
 
         if (!user) throw new Error('UnauthorizedUserFetch');
 
