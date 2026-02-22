@@ -18,6 +18,59 @@ async function me(req, res) {
   return res.json({ user: req.user });
 }
 
+/**
+ * Aggregated endpoint to fetch all admin dashboard summary data in one request,
+ * preventing connection pool exhaustion from 5-10 parallel queries.
+ */
+async function getDashboardSync(req, res) {
+  try {
+    const cacheKey = `admin_dashboard_sync`;
+
+    const dashboardData = await cache.getOrSet(
+      cacheKey,
+      async () => {
+        // Run essential summary queries in parallel
+        const [
+          totalBookings,
+          completedBookings,
+          pendingBookings,
+          b2bBookings,
+          recentUsers,
+          activeDrivers
+        ] = await Promise.all([
+          prisma.booking.count(),
+          prisma.booking.count({ where: { status: 'COMPLETED' } }),
+          prisma.booking.count({ where: { status: 'IN_PROGRESS' } }),
+          prisma.b2b_booking.count(),
+          prisma.user.findMany({
+            take: 5,
+            orderBy: { created_at: 'desc' },
+            select: { id: true, name: true, email: true, created_at: true }
+          }),
+          prisma.driver.count({ where: { status: 'ACTIVE' } })
+        ]);
+
+        return {
+          stats: {
+            totalBookings,
+            completedBookings,
+            pendingBookings,
+            b2bBookings,
+            activeDrivers
+          },
+          recentUsers
+        };
+      },
+      BOOKINGS_CACHE_TTL
+    );
+
+    return res.json({ success: true, data: dashboardData });
+  } catch (err) {
+    console.error('Dashboard Sync Error:', err);
+    return res.status(500).json({ success: false, message: 'Failed to sync dashboard data' });
+  }
+}
+
 async function listPaidBookings(req, res) {
   try {
     const limit = req.query.limit ? parseInt(req.query.limit) : 100;
@@ -505,6 +558,5 @@ module.exports = {
   updateB2BBookingStatus,
   completeB2BTrip,
   cancelB2BBooking,
+  getDashboardSync
 };
-
-
