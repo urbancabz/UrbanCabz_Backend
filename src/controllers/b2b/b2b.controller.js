@@ -1,6 +1,9 @@
 const prisma = require('../../config/prisma');
+const cache = require('../../utils/cache');
 const bcrypt = require('bcryptjs');
 const bookingService = require('../../services/booking.services');
+
+const B2B_CACHE_TTL = 30; // 30 seconds — fresh enough for admin dashboard, saves pool slots
 
 /**
  * @route   POST /api/b2b/register
@@ -43,6 +46,10 @@ const registerB2BRequest = async (req, res) => {
             }
         });
 
+        // Invalidate B2B requests cache
+        cache.invalidate('all_b2b_requests_PENDING');
+        cache.invalidate('all_b2b_requests_undefined');
+
         res.status(201).json({
             success: true,
             message: 'Registration request submitted successfully! Our team will contact you shortly.',
@@ -69,27 +76,31 @@ const registerB2BRequest = async (req, res) => {
 const getAllB2BRequests = async (req, res) => {
     try {
         const { status } = req.query;
+        const where = status ? { status } : {};
+        const cacheKey = `all_b2b_requests_${status}`;
 
-        const where = {};
-        if (status) {
-            where.status = status;
-        }
-
-        const requests = await prisma.b2b_request.findMany({
-            where,
-            include: {
-                company: {
-                    select: {
-                        id: true,
-                        company_name: true,
-                        company_email: true
-                    }
-                }
+        const requests = await cache.getOrSet(
+            cacheKey,
+            async () => {
+                return await prisma.b2b_request.findMany({
+                    where,
+                    include: {
+                        company: {
+                            select: {
+                                id: true,
+                                company_name: true,
+                                company_email: true
+                            }
+                        }
+                    },
+                    orderBy: {
+                        created_at: 'desc'
+                    },
+                    take: 50
+                });
             },
-            orderBy: {
-                created_at: 'desc'
-            }
-        });
+            B2B_CACHE_TTL
+        );
 
         res.json({
             success: true,
@@ -257,6 +268,11 @@ const approveB2BRequest = async (req, res) => {
             return { company, user, request: updatedRequest };
         });
 
+        // Invalidate B2B caches
+        cache.invalidate('all_b2b_requests_PENDING');
+        cache.invalidate('all_b2b_requests_undefined');
+        cache.invalidate('all_b2b_companies');
+
         res.json({
             success: true,
             message: 'B2B request approved successfully',
@@ -310,6 +326,10 @@ const rejectB2BRequest = async (req, res) => {
                 reviewed_at: new Date()
             }
         });
+
+        // Invalidate B2B requests cache
+        cache.invalidate(`all_b2b_requests_${request.status}`);
+        cache.invalidate('all_b2b_requests_undefined');
 
         res.json({
             success: true,
@@ -484,16 +504,25 @@ const getCompanyPayments = async (req, res) => {
         }
 
         const companyId = b2bUser.company.id;
+        const cacheKey = `company_payments_${companyId}`;
 
-        // Fetch all Ledger Payments for this company
-        const payments = await prisma.b2b_payment.findMany({
-            where: { company_id: companyId },
-            orderBy: { paid_at: 'desc' }
-        });
+        // Fetch all Ledger Payments for this company (Cached)
+        const payments = await cache.getOrSet(
+            cacheKey,
+            async () => {
+                return await prisma.b2b_payment.findMany({
+                    where: { company_id: companyId },
+                    orderBy: { paid_at: 'desc' },
+                    take: 50
+                });
+            },
+            B2B_CACHE_TTL
+        );
 
         // Fetch all B2B bookings to calculate summary stats
         const bookings = await prisma.b2b_booking.findMany({
-            where: { company_id: companyId }
+            where: { company_id: companyId },
+            take: 100 // Limit for summary calc
         });
 
         // Calculate Billing Summary
@@ -549,17 +578,26 @@ const getCompanyBookings = async (req, res) => {
             });
         }
 
-        // Fetch all B2B bookings for this company
-        const bookings = await prisma.b2b_booking.findMany({
-            where: { company_id: b2bUser.company.id },
-            orderBy: { created_at: 'desc' },
-            include: {
-                bookedByUser: {
-                    select: { id: true, name: true, email: true }
-                },
-                assignments: true
-            }
-        });
+        const cacheKey = `company_bookings_${b2bUser.company.id}`;
+
+        // Fetch all B2B bookings for this company (cached)
+        const bookings = await cache.getOrSet(
+            cacheKey,
+            async () => {
+                return await prisma.b2b_booking.findMany({
+                    where: { company_id: b2bUser.company.id },
+                    orderBy: { created_at: 'desc' },
+                    include: {
+                        bookedByUser: {
+                            select: { id: true, name: true, email: true }
+                        },
+                        assignments: true
+                    },
+                    take: 50
+                });
+            },
+            B2B_CACHE_TTL
+        );
 
         res.json({
             success: true,
@@ -584,14 +622,22 @@ const getCompanyBookings = async (req, res) => {
  */
 const getCompanies = async (req, res) => {
     try {
-        const companies = await prisma.b2b_company.findMany({
-            orderBy: { company_name: 'asc' },
-            include: {
-                _count: {
-                    select: { company_fleet: true }
-                }
-            }
-        });
+        const cacheKey = 'all_b2b_companies';
+        const companies = await cache.getOrSet(
+            cacheKey,
+            async () => {
+                return await prisma.b2b_company.findMany({
+                    orderBy: { company_name: 'asc' },
+                    include: {
+                        _count: {
+                            select: { company_fleet: true }
+                        }
+                    },
+                    take: 50
+                });
+            },
+            B2B_CACHE_TTL
+        );
 
         res.json({ success: true, data: companies });
     } catch (error) {
@@ -656,6 +702,9 @@ const manageCompanyFleet = async (req, res) => {
                 is_active: true
             }
         });
+
+        // Invalidate company fleet caches
+        cache.invalidate('all_b2b_companies');
 
         res.json({ success: true, message: 'Fleet updated successfully', data: assignment });
     } catch (error) {
@@ -759,21 +808,30 @@ const getCompanyBookingsForAdmin = async (req, res) => {
     try {
         const { id } = req.params;
         const companyId = parseInt(id);
+        const cacheKey = `admin_company_bookings_${companyId}`;
 
-        // 1. Fetch Bookings
-        const bookings = await prisma.b2b_booking.findMany({
-            where: { company_id: companyId },
-            orderBy: { created_at: 'desc' },
-            include: {
-                bookedByUser: {
-                    select: { id: true, name: true, email: true }
-                }
-            }
-        });
+        // 1. Fetch Bookings (Cached)
+        const bookings = await cache.getOrSet(
+            cacheKey,
+            async () => {
+                return await prisma.b2b_booking.findMany({
+                    where: { company_id: companyId },
+                    orderBy: { created_at: 'desc' },
+                    include: {
+                        bookedByUser: {
+                            select: { id: true, name: true, email: true }
+                        }
+                    },
+                    take: 50
+                });
+            },
+            B2B_CACHE_TTL
+        );
 
         const payments = await prisma.b2b_payment.findMany({
             where: { company_id: companyId },
             orderBy: { paid_at: 'desc' },
+            take: 50
         });
 
         // Calculate Billing Summary
@@ -870,6 +928,10 @@ const recordCompanyPayment = async (req, res) => {
             }
         });
 
+        // Invalidate payments cache
+        cache.invalidate(`company_payments_${company_id}`);
+        cache.invalidate(`admin_company_bookings_${company_id}`);
+
         res.json({ success: true, message: 'Payment recorded successfully', data: payment });
     } catch (error) {
         console.error('Record Company Payment Error:', error);
@@ -952,6 +1014,9 @@ const createCompany = async (req, res) => {
             return company;
         });
 
+        // Invalidate companies list
+        cache.invalidate('all_b2b_companies');
+
         res.status(201).json({ success: true, message: 'Company created manually', data: result });
     } catch (error) {
         console.error('Create Company Error:', error);
@@ -991,6 +1056,9 @@ const updateCompany = async (req, res) => {
                 gst_number
             }
         });
+
+        // Invalidate company list
+        cache.invalidate('all_b2b_companies');
 
         res.json({ success: true, message: 'Company details updated', data: updated });
     } catch (error) {
