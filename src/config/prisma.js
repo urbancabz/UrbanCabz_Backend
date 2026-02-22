@@ -1,18 +1,33 @@
 const { PrismaClient } = require('@prisma/client');
 
-// Parse connection_limit from DATABASE_URL for heartbeat sizing
-const CONNECTION_LIMIT = (() => {
-    const url = process.env.DATABASE_URL || '';
-    const match = url.match(/connection_limit=(\d+)/);
-    return match ? parseInt(match[1]) : 10;
-})();
+// ═══════════════════════════════════════════════════════════════
+// DATABASE URL HARDENING
+// Supabase's PgBouncer aggressively kills idle connections (~60s).
+// We override pool parameters in the URL to ensure:
+//   - connection_limit=5  → Don't fight Supabase pooler for slots
+//   - pool_timeout=30     → More time for cold pooler to respond
+//   - pgbouncer=true      → Tell Prisma to use PgBouncer-compatible mode
+//   - connect_timeout=30  → Allow time for sleeping DB to wake
+// ═══════════════════════════════════════════════════════════════
+function hardenDatabaseUrl(url) {
+    if (!url) return url;
+    // Strip existing pool params to avoid conflicts
+    let cleanUrl = url
+        .replace(/[&?]connection_limit=\d+/g, '')
+        .replace(/[&?]pool_timeout=\d+/g, '')
+        .replace(/[&?]connect_timeout=\d+/g, '')
+        .replace(/[&?]pgbouncer=\w+/g, '');
+    const separator = cleanUrl.includes('?') ? '&' : '?';
+    return `${cleanUrl}${separator}connection_limit=5&pool_timeout=30&connect_timeout=30&pgbouncer=true`;
+}
+
+const productionUrl = hardenDatabaseUrl(process.env.DATABASE_URL);
+const devUrl = hardenDatabaseUrl(process.env.DIRECT_URL || process.env.DATABASE_URL);
 
 const basePrisma = new PrismaClient({
     datasources: {
         db: {
-            url: process.env.NODE_ENV === 'production'
-                ? process.env.DATABASE_URL
-                : process.env.DIRECT_URL || process.env.DATABASE_URL
+            url: process.env.NODE_ENV === 'production' ? productionUrl : devUrl
         }
     },
     log: ['warn', 'error'],
@@ -111,13 +126,13 @@ process.on('SIGTERM', async () => {
 });
 
 // ═══════════════════════════════════════════════════════════════
-// HEARTBEAT — Prevents silent TCP drops by cross-region NAT firewalls
-// Single lightweight ping every 2 minutes (NOT all connections at once —
-// that saturated the pool and blocked real user queries)
+// HEARTBEAT — Prevents Supabase PgBouncer from killing idle connections.
+// Supabase drops idle connections after ~60 seconds.
+// Ping every 30 seconds to keep at least one connection alive.
 // ═══════════════════════════════════════════════════════════════
 const heartbeatInterval = setInterval(() => {
     basePrisma.$queryRawUnsafe('SELECT 1').catch(() => { });
-}, 2 * 60 * 1000);
+}, 30 * 1000); // 30 seconds (was 2 minutes - too slow for Supabase)
 
 if (heartbeatInterval.unref) heartbeatInterval.unref();
 
