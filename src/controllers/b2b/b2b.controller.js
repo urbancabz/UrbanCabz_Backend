@@ -3,7 +3,7 @@ const cache = require('../../utils/cache');
 const bcrypt = require('bcryptjs');
 const bookingService = require('../../services/booking.services');
 
-const B2B_CACHE_TTL = 30; // 30 seconds — fresh enough for admin dashboard, saves pool slots
+const B2B_CACHE_TTL = 65; // 65 seconds — fresh enough for admin dashboard, safely outlasts 60s poll
 
 /**
  * @route   POST /api/b2b/register

@@ -2,7 +2,7 @@
 const prisma = require('../config/prisma');
 const cache = require('../utils/cache');
 
-const BOOKINGS_CACHE_TTL = 30; // 30 seconds — fresh enough for dispatch, saves pool slots
+const BOOKINGS_CACHE_TTL = 65; // 65 seconds — survives 60s frontend polling
 const { validationResult } = require('express-validator');
 const {
   sendTaxiAssignmentWhatsApp,
@@ -252,6 +252,7 @@ async function getPendingPayments(req, res) {
         user: true,
         payments: true,
       },
+      take: req.query.limit ? parseInt(req.query.limit) : 50
     });
 
     return res.json({ bookings });

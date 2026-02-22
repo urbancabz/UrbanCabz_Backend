@@ -8,7 +8,7 @@
  * MAX_CONCURRENT must be LESS than the Prisma connection_limit (5)
  * to leave room for heartbeat + system queries.
  */
-const MAX_CONCURRENT = 4; // Pool is 5 — leave 1 slot for heartbeat/system
+const MAX_CONCURRENT = 15; // Pool is 20 — leave 5 slots for heartbeat/system
 const MAX_QUEUE = 50;     // Don't queue more than 50 requests
 
 let activeCount = 0;
