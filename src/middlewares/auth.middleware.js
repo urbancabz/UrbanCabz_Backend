@@ -24,14 +24,14 @@ async function requireAuth(req, res, next) {
     };
     return next();
   } catch (err) {
-    // Distinguish DB errors from auth errors
-    const code = err?.code || err?.errorCode;
-    if (code === 'P2024' || code === 'P2010' || code === 'P1017' || code === 'P1001') {
-      console.error('🔴 Auth middleware DB unavailable:', err.message);
-      return res.status(503).json({ message: 'Service temporarily unavailable. Please try again.' });
+    // Distinguish JWT errors from DB/Server errors
+    if (err.name === 'JsonWebTokenError' || err.name === 'TokenExpiredError' || err.name === 'NotBeforeError') {
+      return res.status(401).json({ message: 'Invalid token' });
     }
-    console.error('auth middleware err', err);
-    return res.status(401).json({ message: 'Invalid token' });
+
+    // If it's a database connection issue or Prisma error, it falls here instead of falsely reporting an invalid token
+    console.error('🔴 Auth middleware DB/Server error:', err.message || err);
+    return res.status(503).json({ message: 'Service temporarily unavailable. Please try again.' });
   }
 }
 
