@@ -613,6 +613,90 @@ const getCompanyBookings = async (req, res) => {
     }
 };
 
+/**
+ * @route   GET /api/b2b/dashboard-sync
+ * @desc    Aggregate Company Profile, Bookings, Payment Stats, and Fleet for the Dashboard mount payload
+ * @access  Private/B2B User
+ */
+const getDashboardSync = async (req, res) => {
+    try {
+        const userId = req.user.id;
+
+        // 1. Get user's company (blocking dependency)
+        const b2bUser = await prisma.b2b_user.findFirst({
+            where: { user_id: userId },
+            include: { company: true }
+        });
+
+        if (!b2bUser || !b2bUser.company) {
+            return res.status(403).json({ success: false, message: 'Company not found for this user' });
+        }
+
+        const companyId = b2bUser.company.id;
+
+        // 2. Fetch dependencies in parallel to minimize overall connection hold time
+        const [bookingsRes, paymentsRes, fleetRes] = await Promise.all([
+            // Bookings (Cached)
+            cache.getOrSet(
+                `company_bookings_${companyId}`,
+                async () => await prisma.b2b_booking.findMany({
+                    where: { company_id: companyId },
+                    orderBy: { created_at: 'desc' },
+                    include: { bookedByUser: { select: { id: true, name: true, email: true } }, assignments: true },
+                    take: 50
+                }),
+                B2B_CACHE_TTL
+            ),
+
+            // Payments (Cached)
+            cache.getOrSet(
+                `company_payments_${companyId}`,
+                async () => await prisma.b2b_payment.findMany({
+                    where: { company_id: companyId },
+                    orderBy: { paid_at: 'desc' },
+                    take: 50
+                }),
+                B2B_CACHE_TTL
+            ),
+
+            // Fleet (Live, small query)
+            prisma.b2b_company_fleet.findMany({
+                where: { company_id: companyId, is_active: true },
+                include: { vehicle: true }
+            })
+        ]);
+
+        // 3. Calculate lightweight billing summary locally without extra DB hits
+        let totalBilled = 0;
+        let totalPaid = 0;
+        bookingsRes.forEach(b => { totalBilled += parseFloat(b.total_amount) || 0; });
+        paymentsRes.forEach(p => { totalPaid += parseFloat(p.amount) || 0; });
+
+        res.json({
+            success: true,
+            data: {
+                company: b2bUser.company,
+                bookings: bookingsRes,
+                payments: paymentsRes,
+                billingSummary: {
+                    totalBilled,
+                    totalPaid,
+                    outstanding: totalBilled - totalPaid,
+                    totalBookings: bookingsRes.length
+                },
+                fleet: fleetRes.map(item => ({
+                    ...item.vehicle,
+                    base_price_per_km: item.custom_price_per_km
+                }))
+            }
+        });
+
+    } catch (error) {
+        console.error('B2B Dashboard Sync Error:', error);
+        res.status(500).json({ success: false, message: 'Failed to synthesize dashboard data' });
+    }
+};
+
 // ===================== COMPANY FLEET MANAGEMENT =====================
 
 /**
@@ -1083,6 +1167,7 @@ module.exports = {
     manageCompanyFleet,
     removeCompanyFleet,
     getMyFleet,
+    getDashboardSync,
     getCompanyBookingsForAdmin,
     recordCompanyPayment,
     createCompany,

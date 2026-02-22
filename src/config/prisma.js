@@ -48,14 +48,17 @@ const MAX_RETRIES = 3;
 
 function isRetryableError(error) {
     const code = error?.code || error?.errorCode;
-    // P2010 (Raw query failed), P1017 (Server closed connection), P1001 (Can't reach db), P1002 (Timeout)
-    // Removed P2024 (Pool exhaustion) from retries because retrying a full pool just multiplies the queue length
-    if (['P2010', 'P1017', 'P1001', 'P1002'].includes(code)) return true;
+    // P2010 (Raw query failed), P1017 (Server closed connection)
+    // REMOVED P1001 (Can't reach db) and P1002 (Timeout) to enforce FAIL-FAST behavior.
+    // Retrying connection timeouts only amplifies the pool queue and causes cascading failure.
+    if (['P2010', 'P1017'].includes(code)) return true;
+
     const name = error?.constructor?.name || '';
     if (name === 'PrismaClientInitializationError') return true;
+
     const msg = error?.message || '';
-    // Removed 'connection pool' from here as well to fail fast instead of clogging the queue
     if (msg.includes('Engine is not yet connected')) return true;
+
     return false;
 }
 

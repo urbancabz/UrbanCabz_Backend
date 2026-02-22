@@ -34,9 +34,12 @@ router.post('/payments', requireAuth, requireAdmin, b2bController.recordCompanyP
 // Company CRUD (Admin)
 router.post('/companies', requireAuth, requireAdmin, b2bController.createCompany);
 router.put('/companies/:id', requireAuth, requireAdmin, b2bController.updateCompany);
-router.delete('/fleet-assignment/:id', requireAuth, requireAdmin, b2bController.removeCompanyFleet);
+router.get('/company/:id/fleet', requireAuth, requireRole(['admin']), b2bController.getCompanyFleet);
+router.post('/company/:id/fleet', requireAuth, requireRole(['admin']), b2bController.manageCompanyFleet);
+router.delete('/fleet-assignment/:id', requireAuth, requireRole(['admin']), b2bController.removeCompanyFleet);
 
-// Company Fleet (B2B User)
-router.get('/my-fleet', requireAuth, b2bController.getMyFleet);
+// B2B User Fleet & Dashboard
+router.get('/my-fleet', requireAuth, requireRole(['b2b_user']), b2bController.getMyFleet);
+router.get('/dashboard-sync', requireAuth, requireRole(['b2b_user']), b2bController.getDashboardSync);
 
 module.exports = router;
