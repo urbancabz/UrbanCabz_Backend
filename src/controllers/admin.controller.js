@@ -22,33 +22,12 @@ async function listPaidBookings(req, res) {
       include: {
         user: true,
         payments: true,
+        assign_taxis: true,
       },
+      take: req.query.limit ? parseInt(req.query.limit) : 100 // Prevent fetching 10,000s of rows
     });
 
-    // Get all booking IDs and load assignments separately
-    const bookingIds = bookings.map((b) => b.id);
-    let assignmentsByBookingId = new Map();
-
-    if (bookingIds.length > 0) {
-      const assignments = await prisma.assign_taxi.findMany({
-        where: {
-          booking_id: { in: bookingIds },
-        },
-      });
-
-      assignments.forEach((a) => {
-        const current = assignmentsByBookingId.get(a.booking_id) || [];
-        current.push(a);
-        assignmentsByBookingId.set(a.booking_id, current);
-      });
-    }
-
-    const enriched = bookings.map((b) => ({
-      ...b,
-      assign_taxis: assignmentsByBookingId.get(b.id) || [],
-    }));
-
-    return res.json({ bookings: enriched });
+    return res.json({ bookings });
   } catch (err) {
     console.error(err);
     const status = err.status || 500;
@@ -205,33 +184,12 @@ async function getCompletedBookings(req, res) {
       include: {
         user: true,
         payments: true,
+        assign_taxis: true,
       },
+      take: req.query.limit ? parseInt(req.query.limit) : 50 // Limit historical data fetch
     });
 
-    // Get all booking IDs and load assignments separately
-    const bookingIds = bookings.map((b) => b.id);
-    let assignmentsByBookingId = new Map();
-
-    if (bookingIds.length > 0) {
-      const assignments = await prisma.assign_taxi.findMany({
-        where: {
-          booking_id: { in: bookingIds },
-        },
-      });
-
-      assignments.forEach((a) => {
-        const current = assignmentsByBookingId.get(a.booking_id) || [];
-        current.push(a);
-        assignmentsByBookingId.set(a.booking_id, current);
-      });
-    }
-
-    const enriched = bookings.map((b) => ({
-      ...b,
-      assign_taxis: assignmentsByBookingId.get(b.id) || [],
-    }));
-
-    return res.json({ bookings: enriched });
+    return res.json({ bookings });
   } catch (err) {
     console.error(err);
     return res.status(500).json({ message: 'Internal server error' });
@@ -301,6 +259,7 @@ async function listB2BBookings(req, res) {
         },
         assignments: true,
       },
+      take: req.query.limit ? parseInt(req.query.limit) : 50
     });
 
     return res.json({ bookings });
