@@ -133,12 +133,7 @@ async function b2bLogin(req, res) {
     const user = await prisma.user.findUnique({
       where: { email },
       include: {
-        role: true,
-        b2bUsers: {
-          include: {
-            company: true
-          }
-        }
+        role: true
       }
     });
 
@@ -168,10 +163,16 @@ async function b2bLogin(req, res) {
       });
     }
 
+    // Find latest company info dynamically
+    const b2bUser = await prisma.b2b_user.findFirst({
+      where: { user_id: user.id },
+      include: { company: true }
+    });
+
     // Add company info to response for normal login
     return res.json({
       ...result,
-      company: user.b2bUsers[0]?.company || null
+      company: b2bUser?.company || null
     });
 
   } catch (err) {
