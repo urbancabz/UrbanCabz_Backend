@@ -72,6 +72,9 @@ model booking {
   user            user       @relation(fields: [user_id], references: [id], onDelete: Cascade)
   payments        payment[]
   assign_taxis    assign_taxi[]
+
+  @@index([status])
+  @@index([taxi_assign_status])
 }
 
 // Payment attempts/records for a booking (e.g. Stripe/Razorpay, etc.)

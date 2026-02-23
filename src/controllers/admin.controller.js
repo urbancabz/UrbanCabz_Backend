@@ -29,90 +29,74 @@ async function getDashboardSync(req, res) {
     const dashboardData = await cache.getOrSet(
       cacheKey,
       async () => {
-        // Run all queries concurrently, fetching lists directly instead of just counts
-        // This is strictly limited to fire only on mount/refresh
-        const [
-          bookings,
-          pendingPayments,
-          completedBookings,
-          cancelledBookings,
-          users,
-          drivers,
-          fleet,
-          b2bCompanies,
-          b2bRequests,
-          b2bBookings,
-          totalBookingsCount,
-          activeDriversCount,
-          b2bBookingsCount
-        ] = await Promise.all([
-          // 1. Live Dispatch (100 most recent)
-          prisma.booking.findMany({
-            take: 100,
-            orderBy: { created_at: 'desc' },
-            include: { user: true, payments: true, assign_taxis: true }
-          }),
-          // 2. Pending Payments (50 most recent)
-          prisma.booking.findMany({
-            where: { status: 'PENDING_PAYMENT', payments: { some: { status: { in: ['CREATED', 'PENDING'] } } } },
-            take: 50,
-            orderBy: { created_at: 'desc' },
-            include: { user: true, payments: true, assign_taxis: true }
-          }),
-          // 3. Completed History (50 most recent)
-          prisma.booking.findMany({
-            where: { status: 'COMPLETED' },
-            take: 50,
-            orderBy: { updated_at: 'desc' },
-            include: { user: true, payments: true, assign_taxis: true }
-          }),
-          // 4. Cancelled History (50 most recent)
-          prisma.booking.findMany({
-            where: { status: 'CANCELLED' },
-            take: 50,
-            orderBy: { updated_at: 'desc' },
-            include: { user: true, payments: true, assign_taxis: true }
-          }),
-          // 5. Users List (100 most recent non-B2B)
-          prisma.user.findMany({
-            where: { role: { name: { not: 'b2b_user' } } },
-            take: 100,
-            orderBy: { created_at: 'desc' },
-            include: { role: true, _count: { select: { bookings: true } } }
-          }),
-          // 6. Drivers List (100 most recent)
-          prisma.driver.findMany({
-            take: 100,
-            orderBy: { name: 'asc' }
-          }),
-          // 7. Fleet (All Active)
-          prisma.fleet_vehicle.findMany({
-            where: { is_active: true }
-          }),
-          // 8. B2B Companies (50 most recent)
-          prisma.b2b_company.findMany({
-            take: 50,
-            orderBy: { company_name: 'asc' },
-            include: { _count: { select: { company_fleet: true } } }
-          }),
-          // 9. B2B Requests (50 most recent)
-          prisma.b2b_request.findMany({
-            take: 50,
-            orderBy: { created_at: 'desc' },
-            include: { company: { select: { id: true, company_name: true, company_email: true } } }
-          }),
-          // 10. B2B Bookings (50 most recent)
-          prisma.b2b_booking.findMany({
-            take: 50,
-            orderBy: { created_at: 'desc' },
-            include: { company: true, bookedByUser: { select: { id: true, name: true, email: true, phone: true } }, assignments: true }
-          }),
+        // Sequential execution: Run one query at a time instead of Promise.all
+        // This ensures the dashboard refresh uses exactly 1 DB connection at a time,
+        // preventing connection pool exhaustion (P2024 schema errors).
 
-          // --- STATS COUNTS ---
-          prisma.booking.count(),
-          prisma.driver.count({ where: { is_active: true } }),
-          prisma.b2b_booking.count()
-        ]);
+        const bookings = await prisma.booking.findMany({
+          take: 100,
+          orderBy: { created_at: 'desc' },
+          include: { user: true, payments: true, assign_taxis: true }
+        });
+
+        const pendingPayments = await prisma.booking.findMany({
+          where: { status: 'PENDING_PAYMENT', payments: { some: { status: { in: ['CREATED', 'PENDING'] } } } },
+          take: 50,
+          orderBy: { created_at: 'desc' },
+          include: { user: true, payments: true, assign_taxis: true }
+        });
+
+        const completedBookings = await prisma.booking.findMany({
+          where: { status: 'COMPLETED' },
+          take: 50,
+          orderBy: { updated_at: 'desc' },
+          include: { user: true, payments: true, assign_taxis: true }
+        });
+
+        const cancelledBookings = await prisma.booking.findMany({
+          where: { status: 'CANCELLED' },
+          take: 50,
+          orderBy: { updated_at: 'desc' },
+          include: { user: true, payments: true, assign_taxis: true }
+        });
+
+        const users = await prisma.user.findMany({
+          where: { role: { name: { not: 'b2b_user' } } },
+          take: 100,
+          orderBy: { created_at: 'desc' },
+          include: { role: true, _count: { select: { bookings: true } } }
+        });
+
+        const drivers = await prisma.driver.findMany({
+          take: 100,
+          orderBy: { name: 'asc' }
+        });
+
+        const fleet = await prisma.fleet_vehicle.findMany({
+          where: { is_active: true }
+        });
+
+        const b2bCompanies = await prisma.b2b_company.findMany({
+          take: 50,
+          orderBy: { company_name: 'asc' },
+          include: { _count: { select: { company_fleet: true } } }
+        });
+
+        const b2bRequests = await prisma.b2b_request.findMany({
+          take: 50,
+          orderBy: { created_at: 'desc' },
+          include: { company: { select: { id: true, company_name: true, company_email: true } } }
+        });
+
+        const b2bBookings = await prisma.b2b_booking.findMany({
+          take: 50,
+          orderBy: { created_at: 'desc' },
+          include: { company: true, bookedByUser: { select: { id: true, name: true, email: true, phone: true } }, assignments: true }
+        });
+
+        const totalBookingsCount = await prisma.booking.count();
+        const activeDriversCount = await prisma.driver.count({ where: { is_active: true } });
+        const b2bBookingsCount = await prisma.b2b_booking.count();
 
         let paidCount = 0;
         let pendingPaymentCount = 0;
