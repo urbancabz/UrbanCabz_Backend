@@ -32,7 +32,33 @@ async function getDashboardSync(req, res) {
         // Run essential summary queries strictly sequentially to ensure exactly 1 connection per active request
         const totalBookings = await prisma.booking.count();
         const completedBookings = await prisma.booking.count({ where: { status: 'COMPLETED' } });
-        const pendingBookings = await prisma.booking.count({ where: { status: 'IN_PROGRESS' } });
+        const inProgressBookings = await prisma.booking.count({ where: { status: 'IN_PROGRESS' } });
+
+        // Calculate exact numbers for frontend 'Action Needed' logic
+        // A booking is "paid" if status === 'PAID' or (status === 'PENDING_PAYMENT' and payments has successes)
+        const allPendingOrPaid = await prisma.booking.findMany({
+          where: {
+            status: { in: ['PAID', 'PENDING_PAYMENT'] }
+          },
+          include: { payments: true }
+        });
+
+        let paidCount = 0;
+        let pendingPaymentCount = 0;
+        let assignedCount = 0;
+
+        allPendingOrPaid.forEach(b => {
+          const isPaid = b.status === 'PAID' || (b.status === 'PENDING_PAYMENT' && b.payments?.some(p => p.status === 'SUCCESS'));
+          if (isPaid) {
+            paidCount++;
+            if (b.taxi_assign_status === 'ASSIGNED') assignedCount++;
+          } else {
+            pendingPaymentCount++;
+          }
+        });
+
+        const readyToAssign = Math.max(0, paidCount - assignedCount);
+
         const b2bBookings = await prisma.b2b_booking.count();
         const recentUsers = await prisma.user.findMany({
           take: 5,
@@ -45,7 +71,10 @@ async function getDashboardSync(req, res) {
           stats: {
             totalBookings,
             completedBookings,
-            pendingBookings,
+            pendingBookings: inProgressBookings, // originally mapped this way in backend
+            actualPendingPayment: pendingPaymentCount,
+            paidCount,
+            readyToAssign,
             b2bBookings,
             activeDrivers
           },
