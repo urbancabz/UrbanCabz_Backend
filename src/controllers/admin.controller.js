@@ -29,25 +29,97 @@ async function getDashboardSync(req, res) {
     const dashboardData = await cache.getOrSet(
       cacheKey,
       async () => {
-        // Run essential summary queries strictly sequentially to ensure exactly 1 connection per active request
-        const totalBookings = await prisma.booking.count();
-        const completedBookings = await prisma.booking.count({ where: { status: 'COMPLETED' } });
-        const inProgressBookings = await prisma.booking.count({ where: { status: 'IN_PROGRESS' } });
+        // Run all queries concurrently, fetching lists directly instead of just counts
+        // This is strictly limited to fire only on mount/refresh
+        const [
+          bookings,
+          pendingPayments,
+          completedBookings,
+          cancelledBookings,
+          users,
+          drivers,
+          fleet,
+          b2bCompanies,
+          b2bRequests,
+          b2bBookings,
+          totalBookingsCount,
+          activeDriversCount,
+          b2bBookingsCount
+        ] = await Promise.all([
+          // 1. Live Dispatch (100 most recent)
+          prisma.booking.findMany({
+            take: 100,
+            orderBy: { created_at: 'desc' },
+            include: { user: true, payments: true, assign_taxis: true }
+          }),
+          // 2. Pending Payments (50 most recent)
+          prisma.booking.findMany({
+            where: { status: 'PENDING_PAYMENT', payments: { some: { status: { in: ['CREATED', 'PENDING'] } } } },
+            take: 50,
+            orderBy: { created_at: 'desc' },
+            include: { user: true, payments: true, assign_taxis: true }
+          }),
+          // 3. Completed History (50 most recent)
+          prisma.booking.findMany({
+            where: { status: 'COMPLETED' },
+            take: 50,
+            orderBy: { updated_at: 'desc' },
+            include: { user: true, payments: true, assign_taxis: true }
+          }),
+          // 4. Cancelled History (50 most recent)
+          prisma.booking.findMany({
+            where: { status: 'CANCELLED' },
+            take: 50,
+            orderBy: { updated_at: 'desc' },
+            include: { user: true, payments: true, assign_taxis: true }
+          }),
+          // 5. Users List (100 most recent non-B2B)
+          prisma.user.findMany({
+            where: { role: { name: { not: 'b2b_user' } } },
+            take: 100,
+            orderBy: { created_at: 'desc' },
+            include: { role: true, _count: { select: { bookings: true } } }
+          }),
+          // 6. Drivers List (100 most recent)
+          prisma.driver.findMany({
+            take: 100,
+            orderBy: { name: 'asc' }
+          }),
+          // 7. Fleet (All Active)
+          prisma.fleet_vehicle.findMany({
+            where: { is_active: true }
+          }),
+          // 8. B2B Companies (50 most recent)
+          prisma.b2b_company.findMany({
+            take: 50,
+            orderBy: { company_name: 'asc' },
+            include: { _count: { select: { company_fleet: true } } }
+          }),
+          // 9. B2B Requests (50 most recent)
+          prisma.b2b_request.findMany({
+            take: 50,
+            orderBy: { created_at: 'desc' },
+            include: { company: { select: { id: true, company_name: true, company_email: true } } }
+          }),
+          // 10. B2B Bookings (50 most recent)
+          prisma.b2b_booking.findMany({
+            take: 50,
+            orderBy: { created_at: 'desc' },
+            include: { company: true, bookedByUser: { select: { id: true, name: true, email: true, phone: true } }, assignments: true }
+          }),
 
-        // Calculate exact numbers for frontend 'Action Needed' logic
-        // A booking is "paid" if status === 'PAID' or (status === 'PENDING_PAYMENT' and payments has successes)
-        const allPendingOrPaid = await prisma.booking.findMany({
-          where: {
-            status: { in: ['PAID', 'PENDING_PAYMENT'] }
-          },
-          include: { payments: true }
-        });
+          // --- STATS COUNTS ---
+          prisma.booking.count(),
+          prisma.driver.count({ where: { is_active: true } }),
+          prisma.b2b_booking.count()
+        ]);
 
         let paidCount = 0;
         let pendingPaymentCount = 0;
         let assignedCount = 0;
 
-        allPendingOrPaid.forEach(b => {
+        // Calculate actionable stats from the active bookings array
+        bookings.forEach(b => {
           const isPaid = b.status === 'PAID' || (b.status === 'PENDING_PAYMENT' && b.payments?.some(p => p.status === 'SUCCESS'));
           if (isPaid) {
             paidCount++;
@@ -59,26 +131,28 @@ async function getDashboardSync(req, res) {
 
         const readyToAssign = Math.max(0, paidCount - assignedCount);
 
-        const b2bBookings = await prisma.b2b_booking.count();
-        const recentUsers = await prisma.user.findMany({
-          take: 5,
-          orderBy: { created_at: 'desc' },
-          select: { id: true, name: true, email: true, created_at: true }
-        });
-        const activeDrivers = await prisma.driver.count({ where: { is_active: true } });
-
         return {
+          bookings,
+          pendingPayments,
+          completedBookings,
+          cancelledBookings,
+          users,
+          drivers,
+          fleet,
+          b2bCompanies,
+          b2bRequests,
+          b2bBookings,
           stats: {
-            totalBookings,
-            completedBookings,
-            pendingBookings: inProgressBookings, // originally mapped this way in backend
+            totalBookings: totalBookingsCount,
+            completedBookings: completedBookings.length,
+            pendingBookings: pendingPayments.length,
             actualPendingPayment: pendingPaymentCount,
             paidCount,
             readyToAssign,
-            b2bBookings,
-            activeDrivers
+            b2bBookings: b2bBookingsCount,
+            activeDrivers: activeDriversCount
           },
-          recentUsers
+          recentUsers: users.slice(0, 5) // Reuse the users array for recent users
         };
       },
       BOOKINGS_CACHE_TTL
