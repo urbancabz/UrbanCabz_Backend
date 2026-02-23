@@ -10,12 +10,11 @@ function hardenDatabaseUrl(url) {
         .replace(/[&?]pgbouncer=\w+/g, '');
     const separator = cleanUrl.includes('?') ? '&' : '?';
 
-    // Only use pgbouncer=true if specifically using port 6543 (Supabase connection pooler)
-    const isPgBouncer = cleanUrl.includes(':6543') ? '&pgbouncer=true' : '';
-
-    // With PgBouncer transaction mode, 5 Prisma connections is plenty.
-    // PgBouncer multiplexes these into 20+ actual concurrent DB operations.
-    return `${cleanUrl}${separator}connection_limit=5&pool_timeout=20&connect_timeout=15${isPgBouncer}`;
+    // Keep connection pool small — our caching, dedupe, withRetry, and $transaction
+    // ensure we never need more than 5 concurrent connections.
+    // NOTE: Port 6543 (transaction mode) is unreachable from Render.
+    // Using port 5432 (session mode pooler) which works fine.
+    return `${cleanUrl}${separator}connection_limit=5&pool_timeout=20&connect_timeout=15`;
 }
 
 const productionUrl = hardenDatabaseUrl(process.env.DATABASE_URL);
