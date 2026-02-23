@@ -89,7 +89,8 @@ const createFleetVehicle = async (req, res) => {
         // Invalidate fleet cache
         cache.invalidate(`${FLEET_CACHE_KEY_BASE}_all`);
         cache.invalidate(`${FLEET_CACHE_KEY_BASE}_true`);
-        cache.invalidate('admin_dashboard_sync');
+        cache.invalidate('fleet:public');
+        cache.invalidate('admin:dashboard_sync');
 
         res.status(201).json({ success: true, data: { vehicle }, message: 'Vehicle created successfully' });
     } catch (error) {
@@ -141,7 +142,8 @@ const updateFleetVehicle = async (req, res) => {
         // Invalidate fleet cache
         cache.invalidate(`${FLEET_CACHE_KEY_BASE}_all`);
         cache.invalidate(`${FLEET_CACHE_KEY_BASE}_true`);
-        cache.invalidate('admin_dashboard_sync');
+        cache.invalidate('fleet:public');
+        cache.invalidate('admin:dashboard_sync');
 
         res.json({ success: true, data: { vehicle }, message: 'Vehicle updated successfully' });
     } catch (error) {
@@ -180,7 +182,8 @@ const deleteFleetVehicle = async (req, res) => {
         // Invalidate fleet cache
         cache.invalidate(`${FLEET_CACHE_KEY_BASE}_all`);
         cache.invalidate(`${FLEET_CACHE_KEY_BASE}_true`);
-        cache.invalidate('admin_dashboard_sync');
+        cache.invalidate('fleet:public');
+        cache.invalidate('admin:dashboard_sync');
 
         res.json({ success: true, message: 'Vehicle deactivated successfully' });
     } catch (error) {

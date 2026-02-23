@@ -86,4 +86,4 @@ function flush() {
     inFlight.clear();
 }
 
-module.exports = { set, get, getOrSet, invalidate, flush };
+module.exports = { set, get, getOrSet, invalidate, delete: invalidate, flush };
