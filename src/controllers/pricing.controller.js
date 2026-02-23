@@ -36,10 +36,15 @@ const getPricingSettings = async (req, res) => {
         res.setHeader('Pragma', 'no-cache');
         res.setHeader('Expires', '0');
 
-        res.json({ success: true, data: settings });
+        return res.json({ success: true, data: settings });
     } catch (error) {
         console.error('Error fetching pricing settings:', error);
-        res.status(500).json({ success: false, message: 'Failed to fetch settings' });
+
+        // If DB is busy, return last cached value if available
+        const stale = cache.get(PRICING_CACHE_KEY);
+        if (stale) return res.json({ success: true, data: stale, stale: true });
+
+        return res.status(503).json({ success: false, message: 'Pricing temporarily unavailable' });
     }
 };
 

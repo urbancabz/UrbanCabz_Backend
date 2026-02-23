@@ -19,6 +19,11 @@ async function startServer() {
         try {
             await prisma.$queryRawUnsafe('SELECT 1');
             console.log('✅ Database connection established.');
+
+            // At server startup — pre-load pricing into cache AFTER warmup completes
+            const { getPricingSettings } = require('./controllers/pricing.controller');
+            // Do NOT call it here — let it load lazily on first request
+
             break;
         } catch (err) {
             console.warn(`⚠️  DB warm-up attempt ${attempt}/5 failed: ${err.message}`);
