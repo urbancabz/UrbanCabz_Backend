@@ -20,8 +20,9 @@ async function register(req, res) {
         await verificationService.sendVerificationOtp(result.user.id);
         result.verificationPending = true;
 
-        // Send Welcome Email
-        await emailService.sendWelcomeEmail(result.user);
+        // Send Welcome Email (fire-and-forget — never block response for SMTP)
+        emailService.sendWelcomeEmail(result.user)
+          .catch(err => console.error('Welcome email failed:', err.message));
       }
     } catch (otpErr) {
       console.error('Failed to send initial signup OTP/Email:', otpErr);

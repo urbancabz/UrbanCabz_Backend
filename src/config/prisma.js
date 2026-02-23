@@ -13,8 +13,8 @@ function hardenDatabaseUrl(url) {
     // Only use pgbouncer=true if specifically using port 6543 (Supabase connection pooler)
     const isPgBouncer = cleanUrl.includes(':6543') ? '&pgbouncer=true' : '';
 
-    // Set connection limit to 20 as per your requirements
-    return `${cleanUrl}${separator}connection_limit=20&pool_timeout=30&connect_timeout=30${isPgBouncer}`;
+    // PgBouncer multiplexes connections — 10 through PgBouncer > 20 direct
+    return `${cleanUrl}${separator}connection_limit=10&pool_timeout=30&connect_timeout=30${isPgBouncer}`;
 }
 
 const productionUrl = hardenDatabaseUrl(process.env.DATABASE_URL);

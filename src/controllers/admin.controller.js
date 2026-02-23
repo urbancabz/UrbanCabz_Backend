@@ -272,7 +272,8 @@ async function upsertAssignTaxi(req, res) {
 
       // Send Email to Customer
       if (booking.user && booking.user.email) {
-        await emailService.sendDriverAssignedEmail(booking, assignment, booking.user)
+        // Fire-and-forget — never block response for SMTP
+        emailService.sendDriverAssignedEmail(booking, assignment, booking.user)
           .catch(err => console.error('Failed to send driver assignment email:', err));
       }
 

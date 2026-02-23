@@ -1,7 +1,7 @@
 const prisma = require('../config/prisma');
 const cache = require('../utils/cache');
 
-const FLEET_CACHE_TTL = 65; // 65 seconds
+const FLEET_CACHE_TTL = 120; // 2 minutes — fleet changes infrequently
 const FLEET_CACHE_KEY_BASE = 'fleet_vehicles';
 
 // ===================== FLEET VEHICLE CRUD =====================

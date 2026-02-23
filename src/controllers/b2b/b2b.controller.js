@@ -354,24 +354,31 @@ const rejectB2BRequest = async (req, res) => {
 const getCompanyById = async (req, res) => {
     try {
         const { id } = req.params;
+        const cacheKey = `b2b:company:${id}`;
 
-        const company = await prisma.b2b_company.findUnique({
-            where: { id: parseInt(id) },
-            include: {
-                b2bUsers: {
+        const company = await cache.getOrSet(
+            cacheKey,
+            async () => {
+                return await prisma.b2b_company.findUnique({
+                    where: { id: parseInt(id) },
                     include: {
-                        user: {
-                            select: {
-                                id: true,
-                                email: true,
-                                name: true,
-                                phone: true
+                        b2bUsers: {
+                            include: {
+                                user: {
+                                    select: {
+                                        id: true,
+                                        email: true,
+                                        name: true,
+                                        phone: true
+                                    }
+                                }
                             }
                         }
                     }
-                }
-            }
-        });
+                });
+            },
+            B2B_CACHE_TTL
+        );
 
         if (!company) {
             return res.status(404).json({
@@ -404,9 +411,16 @@ const getMyCompanyProfile = async (req, res) => {
         const companyId = req.user.companyId;
         if (!companyId) return res.status(403).json({ success: false, message: 'Company not found' });
 
-        const company = await prisma.b2b_company.findUnique({
-            where: { id: companyId }
-        });
+        const cacheKey = `b2b:my_company:${companyId}`;
+        const company = await cache.getOrSet(
+            cacheKey,
+            async () => {
+                return await prisma.b2b_company.findUnique({
+                    where: { id: companyId }
+                });
+            },
+            B2B_CACHE_TTL
+        );
 
         if (!company) {
             return res.status(404).json({
@@ -499,11 +513,17 @@ const getCompanyPayments = async (req, res) => {
             B2B_CACHE_TTL
         );
 
-        // Fetch all B2B bookings to calculate summary stats
-        const bookings = await prisma.b2b_booking.findMany({
-            where: { company_id: companyId },
-            take: 100 // Limit for summary calc
-        });
+        // Fetch all B2B bookings to calculate summary stats (Cached)
+        const bookings = await cache.getOrSet(
+            `b2b:company_bookings_billing:${companyId}`,
+            async () => {
+                return await prisma.b2b_booking.findMany({
+                    where: { company_id: companyId },
+                    take: 100
+                });
+            },
+            B2B_CACHE_TTL
+        );
 
         // Calculate Billing Summary
         let totalBilled = 0;
@@ -697,13 +717,20 @@ const getCompanies = async (req, res) => {
 const getCompanyFleet = async (req, res) => {
     try {
         const { id } = req.params;
+        const cacheKey = `b2b:company_fleet:${id}`;
 
-        const fleet = await prisma.b2b_company_fleet.findMany({
-            where: { company_id: parseInt(id) },
-            include: {
-                vehicle: true
-            }
-        });
+        const fleet = await cache.getOrSet(
+            cacheKey,
+            async () => {
+                return await prisma.b2b_company_fleet.findMany({
+                    where: { company_id: parseInt(id) },
+                    include: {
+                        vehicle: true
+                    }
+                });
+            },
+            B2B_CACHE_TTL
+        );
 
         res.json({ success: true, data: fleet });
     } catch (error) {
@@ -748,6 +775,8 @@ const manageCompanyFleet = async (req, res) => {
 
         // Invalidate company fleet caches
         cache.invalidate('all_b2b_companies');
+        cache.invalidate(`b2b:company_fleet:${id}`);
+        cache.invalidate(`b2b:my_fleet:${id}`);
 
         res.json({ success: true, message: 'Fleet updated successfully', data: assignment });
     } catch (error) {
@@ -777,6 +806,11 @@ const removeCompanyFleet = async (req, res) => {
             where: { id: parseInt(id) }
         });
 
+        // Invalidate fleet caches
+        cache.invalidate(`b2b:company_fleet:${assignment.company_id}`);
+        cache.invalidate(`b2b:my_fleet:${assignment.company_id}`);
+        cache.invalidate('all_b2b_companies');
+
         res.json({ success: true, message: 'Vehicle removed from company fleet' });
     } catch (error) {
         console.error('Remove Company Fleet Error:', error);
@@ -794,36 +828,29 @@ const getMyFleet = async (req, res) => {
         const companyId = req.user.companyId;
         if (!companyId) return res.status(403).json({ success: false, message: 'Company not found' });
 
-        // Fetch assigned fleet
-        console.log("[B2B Fleet] Fetching for company ID:", companyId);
+        const cacheKey = `b2b:my_fleet:${companyId}`;
 
-        const assignedFleet = await prisma.b2b_company_fleet.findMany({
-            where: {
-                company_id: companyId,
-                is_active: true
+        const vehicles = await cache.getOrSet(
+            cacheKey,
+            async () => {
+                const assignedFleet = await prisma.b2b_company_fleet.findMany({
+                    where: {
+                        company_id: companyId,
+                        is_active: true
+                    },
+                    include: {
+                        vehicle: true
+                    }
+                });
+
+                // Transform to match public fleet structure but with custom price
+                return assignedFleet.map(item => ({
+                    ...item.vehicle,
+                    base_price_per_km: item.custom_price_per_km
+                }));
             },
-            include: {
-                vehicle: true
-            }
-        });
-
-        console.log("[B2B Fleet] Found vehicles:", assignedFleet.length);
-        if (assignedFleet.length === 0) {
-            // Debug: Check total assignments
-            const totalAssignments = await prisma.b2b_company_fleet.findMany({
-                where: { company_id: companyId }
-            });
-            console.log("[B2B Fleet] Total assignments (ignoring active):", totalAssignments.length);
-            totalAssignments.forEach(a => {
-                console.log(`  - Vehicle ID: ${a.fleet_vehicle_id}, is_active: ${a.is_active}`);
-            });
-        }
-
-        // Transform to match public fleet structure but with custom price
-        const vehicles = assignedFleet.map(item => ({
-            ...item.vehicle,
-            base_price_per_km: item.custom_price_per_km // Override price
-        }));
+            B2B_CACHE_TTL
+        );
 
         res.json({ success: true, data: { vehicles } });
 
@@ -862,11 +889,18 @@ const getCompanyBookingsForAdmin = async (req, res) => {
             B2B_CACHE_TTL
         );
 
-        const payments = await prisma.b2b_payment.findMany({
-            where: { company_id: companyId },
-            orderBy: { paid_at: 'desc' },
-            take: 50
-        });
+        // Payments (Cached)
+        const payments = await cache.getOrSet(
+            `b2b:company_payments_admin:${companyId}`,
+            async () => {
+                return await prisma.b2b_payment.findMany({
+                    where: { company_id: companyId },
+                    orderBy: { paid_at: 'desc' },
+                    take: 50
+                });
+            },
+            B2B_CACHE_TTL
+        );
 
         // Calculate Billing Summary
         let totalBilled = 0;
@@ -962,9 +996,11 @@ const recordCompanyPayment = async (req, res) => {
             }
         });
 
-        // Invalidate payments cache
+        // Invalidate payments caches
         cache.invalidate(`company_payments_${company_id}`);
         cache.invalidate(`admin_company_bookings_${company_id}`);
+        cache.invalidate(`b2b:company_payments_admin:${company_id}`);
+        cache.invalidate(`b2b:company_bookings_billing:${company_id}`);
 
         res.json({ success: true, message: 'Payment recorded successfully', data: payment });
     } catch (error) {
@@ -1050,6 +1086,8 @@ const createCompany = async (req, res) => {
 
         // Invalidate companies list
         cache.invalidate('all_b2b_companies');
+        cache.invalidate(`b2b:company:${result.id}`);
+        cache.invalidate(`b2b:my_company:${result.id}`);
 
         res.status(201).json({ success: true, message: 'Company created manually', data: result });
     } catch (error) {
@@ -1091,8 +1129,10 @@ const updateCompany = async (req, res) => {
             }
         });
 
-        // Invalidate company list
+        // Invalidate company caches
         cache.invalidate('all_b2b_companies');
+        cache.invalidate(`b2b:company:${id}`);
+        cache.invalidate(`b2b:my_company:${parseInt(id)}`);
 
         res.json({ success: true, message: 'Company details updated', data: updated });
     } catch (error) {
