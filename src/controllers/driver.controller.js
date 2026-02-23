@@ -82,6 +82,10 @@ const createDriver = async (req, res) => {
             }
         });
 
+        cache.invalidate('admin:drivers_true');
+        cache.invalidate('admin:drivers_undefined');
+        cache.invalidate('admin_dashboard_sync');
+
         res.status(201).json({ success: true, data: { driver }, message: 'Driver registered successfully' });
     } catch (error) {
         console.error('Error creating driver:', error);
@@ -131,6 +135,10 @@ const updateDriver = async (req, res) => {
             }
         });
 
+        cache.invalidate('admin:drivers_true');
+        cache.invalidate('admin:drivers_undefined');
+        cache.invalidate('admin_dashboard_sync');
+
         res.json({ success: true, data: { driver }, message: 'Driver updated successfully' });
     } catch (error) {
         console.error('Error updating driver:', error);
@@ -165,6 +173,10 @@ const deleteDriver = async (req, res) => {
                 reason: 'Driver deactivated'
             }
         });
+
+        cache.invalidate('admin:drivers_true');
+        cache.invalidate('admin:drivers_undefined');
+        cache.invalidate('admin_dashboard_sync');
 
         res.json({ success: true, message: 'Driver deactivated successfully' });
     } catch (error) {

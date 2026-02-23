@@ -199,10 +199,29 @@ async function upsertAssignTaxi(req, res) {
       markAssigned = false,
     } = req.body;
 
-    // Ensure booking exists and is paid
+    // Ensure booking exists
+    // Fetch only needed fields — faster, uses less connection time
     const booking = await prisma.booking.findUnique({
       where: { id: bookingId },
-      include: { user: true },
+      select: {
+        id: true,
+        pickup_location: true,
+        drop_location: true,
+        total_amount: true,
+        payments: {
+          select: {
+            amount: true,
+            status: true
+          }
+        },
+        user: {
+          select: {
+            name: true,
+            phone: true,
+            email: true
+          }
+        }
+      }
     });
 
     if (!booking) {
@@ -274,6 +293,7 @@ async function upsertAssignTaxi(req, res) {
 
     // Invalidate booking cache so next poll gets fresh data
     cache.invalidate(`admin_bookings_100`);
+    cache.invalidate(`admin_dashboard_sync`);
 
     return res.status(200).json({
       message: 'Taxi assignment saved successfully',
@@ -535,6 +555,7 @@ async function upsertB2BAssignTaxi(req, res) {
 
     // Invalidate B2B booking cache so next poll gets fresh data
     cache.invalidate(`admin_b2b_bookings_50`);
+    cache.invalidate(`admin_dashboard_sync`);
 
     return res.status(200).json({
       success: true,
@@ -571,6 +592,9 @@ async function markB2BBillPaid(req, res) {
         status: 'PAID'
       }
     });
+
+    cache.invalidate('admin_b2b_bookings_50');
+    cache.invalidate('admin_dashboard_sync');
 
     return res.json({
       success: true,
