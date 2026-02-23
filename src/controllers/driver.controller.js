@@ -1,4 +1,5 @@
 const prisma = require('../config/prisma');
+const cache = require('../utils/cache');
 
 // ===================== DRIVER REGISTRY CRUD =====================
 
@@ -6,6 +7,10 @@ const prisma = require('../config/prisma');
 const getDrivers = async (req, res) => {
     try {
         const { activeOnly } = req.query;
+        const cacheKey = `admin:drivers_${activeOnly}`;
+        const cached = cache.get(cacheKey);
+        if (cached) return res.json(cached);
+
         const where = activeOnly === 'true' ? { is_active: true } : {};
 
         const drivers = await prisma.driver.findMany({
@@ -13,7 +18,9 @@ const getDrivers = async (req, res) => {
             orderBy: { name: 'asc' }
         });
 
-        res.json({ success: true, data: { drivers } });
+        const result = { success: true, data: { drivers } };
+        cache.set(cacheKey, result, 60);
+        res.json(result);
     } catch (error) {
         console.error('Error fetching drivers:', error);
         res.status(500).json({ success: false, message: 'Failed to fetch drivers' });

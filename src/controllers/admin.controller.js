@@ -266,18 +266,32 @@ async function getBookingTicket(req, res) {
  */
 async function getCompletedBookings(req, res) {
   try {
+    const limit = req.query.limit ? parseInt(req.query.limit) : 50;
+    const cacheKey = `admin:completed_bookings_${limit}`;
+    const cached = cache.get(cacheKey);
+    if (cached) return res.json(cached);
+
     const bookings = await prisma.booking.findMany({
       where: { status: 'COMPLETED' },
       orderBy: { updated_at: 'desc' },
-      include: {
-        user: true,
-        payments: true,
-        assign_taxis: true,
+      select: {
+        id: true,
+        created_at: true,
+        updated_at: true,
+        pickup_location: true,
+        drop_location: true,
+        total_amount: true,
+        status: true,
+        user: { select: { name: true, phone: true } },
+        payments: { select: { provider: true } },
+        assign_taxis: { select: { cab_name: true, cab_number: true, driver_name: true } },
       },
-      take: req.query.limit ? parseInt(req.query.limit) : 50 // Limit historical data fetch
+      take: limit
     });
 
-    return res.json({ bookings });
+    const result = { bookings };
+    cache.set(cacheKey, result, 60);
+    return res.json(result);
   } catch (err) {
     console.error(err);
     return res.status(500).json({ message: 'Internal server error' });
@@ -289,17 +303,32 @@ async function getCompletedBookings(req, res) {
  */
 async function getCancelledBookings(req, res) {
   try {
+    const limit = req.query.limit ? parseInt(req.query.limit) : 50;
+    const cacheKey = `admin:cancelled_bookings_${limit}`;
+    const cached = cache.get(cacheKey);
+    if (cached) return res.json(cached);
+
     const bookings = await prisma.booking.findMany({
       where: { status: 'CANCELLED' },
       orderBy: { updated_at: 'desc' },
-      include: {
-        user: true,
-        payments: true,
+      select: {
+        id: true,
+        created_at: true,
+        updated_at: true,
+        pickup_location: true,
+        drop_location: true,
+        total_amount: true,
+        status: true,
+        user: { select: { name: true, phone: true } },
+        payments: { select: { provider: true } },
+        assign_taxis: { select: { cab_name: true, cab_number: true, driver_name: true } },
       },
-      take: req.query.limit ? parseInt(req.query.limit) : 50
+      take: limit
     });
 
-    return res.json({ bookings });
+    const result = { bookings };
+    cache.set(cacheKey, result, 60);
+    return res.json(result);
   } catch (err) {
     console.error(err);
     return res.status(500).json({ message: 'Internal server error' });
@@ -311,6 +340,11 @@ async function getCancelledBookings(req, res) {
  */
 async function getPendingPayments(req, res) {
   try {
+    const limit = req.query.limit ? parseInt(req.query.limit) : 50;
+    const cacheKey = `admin:pending_payments_${limit}`;
+    const cached = cache.get(cacheKey);
+    if (cached) return res.json(cached);
+
     const bookings = await prisma.booking.findMany({
       where: {
         status: 'PENDING_PAYMENT',
@@ -321,14 +355,24 @@ async function getPendingPayments(req, res) {
         }
       },
       orderBy: { created_at: 'desc' },
-      include: {
-        user: true,
-        payments: true,
+      select: {
+        id: true,
+        created_at: true,
+        updated_at: true,
+        pickup_location: true,
+        drop_location: true,
+        total_amount: true,
+        status: true,
+        user: { select: { name: true, phone: true } },
+        payments: { select: { provider: true } },
+        assign_taxis: { select: { cab_name: true, cab_number: true, driver_name: true } },
       },
-      take: req.query.limit ? parseInt(req.query.limit) : 50
+      take: limit
     });
 
-    return res.json({ bookings });
+    const result = { bookings };
+    cache.set(cacheKey, result, 60);
+    return res.json(result);
   } catch (err) {
     console.error(err);
     return res.status(500).json({ message: 'Internal server error' });

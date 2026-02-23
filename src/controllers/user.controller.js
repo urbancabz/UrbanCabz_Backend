@@ -1,5 +1,6 @@
 // src/controllers/user.controller.js
 const prisma = require('../config/prisma');
+const cache = require('../utils/cache');
 
 /**
  * @route   GET /api/admin/users
@@ -9,6 +10,11 @@ const prisma = require('../config/prisma');
 const listUsers = async (req, res) => {
     try {
         const { search, page = 1, limit = 10 } = req.query;
+
+        const cacheKey = `admin:users_${search || 'all'}_${page}_${limit}`;
+        const cached = cache.get(cacheKey);
+        if (cached) return res.json(cached);
+
         const skip = (page - 1) * limit;
 
         const where = {
@@ -49,7 +55,7 @@ const listUsers = async (req, res) => {
 
         const total = await prisma.user.count({ where });
 
-        res.json({
+        const result = {
             success: true,
             data: {
                 users,
@@ -60,7 +66,10 @@ const listUsers = async (req, res) => {
                     pages: Math.ceil(total / limit)
                 }
             }
-        });
+        };
+
+        cache.set(cacheKey, result, 60);
+        res.json(result);
     } catch (error) {
         console.error('List Users Error:', error);
         res.status(500).json({ success: false, message: 'Failed to fetch users' });
