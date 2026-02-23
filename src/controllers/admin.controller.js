@@ -29,115 +29,115 @@ async function getDashboardSync(req, res) {
     const dashboardData = await cache.getOrSet(
       cacheKey,
       async () => {
-        // Sequential execution: Run one query at a time instead of Promise.all
-        // This ensures the dashboard refresh uses exactly 1 DB connection at a time,
-        // preventing connection pool exhaustion (P2024 schema errors).
+        // Use interactive transaction so ALL queries share ONE connection.
+        // Without this, 13 sequential queries hold the pool for the entire duration.
+        return await prisma.$transaction(async (tx) => {
 
-        const bookings = await prisma.booking.findMany({
-          take: 100,
-          orderBy: { created_at: 'desc' },
-          include: { user: true, payments: true, assign_taxis: true }
-        });
+          const bookings = await tx.booking.findMany({
+            take: 100,
+            orderBy: { created_at: 'desc' },
+            include: { user: true, payments: true, assign_taxis: true }
+          });
 
-        const pendingPayments = await prisma.booking.findMany({
-          where: { status: 'PENDING_PAYMENT', payments: { some: { status: { in: ['CREATED', 'PENDING'] } } } },
-          take: 50,
-          orderBy: { created_at: 'desc' },
-          include: { user: true, payments: true, assign_taxis: true }
-        });
+          const pendingPayments = await tx.booking.findMany({
+            where: { status: 'PENDING_PAYMENT', payments: { some: { status: { in: ['CREATED', 'PENDING'] } } } },
+            take: 50,
+            orderBy: { created_at: 'desc' },
+            include: { user: true, payments: true, assign_taxis: true }
+          });
 
-        const completedBookings = await prisma.booking.findMany({
-          where: { status: 'COMPLETED' },
-          take: 50,
-          orderBy: { updated_at: 'desc' },
-          include: { user: true, payments: true, assign_taxis: true }
-        });
+          const completedBookings = await tx.booking.findMany({
+            where: { status: 'COMPLETED' },
+            take: 50,
+            orderBy: { updated_at: 'desc' },
+            include: { user: true, payments: true, assign_taxis: true }
+          });
 
-        const cancelledBookings = await prisma.booking.findMany({
-          where: { status: 'CANCELLED' },
-          take: 50,
-          orderBy: { updated_at: 'desc' },
-          include: { user: true, payments: true, assign_taxis: true }
-        });
+          const cancelledBookings = await tx.booking.findMany({
+            where: { status: 'CANCELLED' },
+            take: 50,
+            orderBy: { updated_at: 'desc' },
+            include: { user: true, payments: true, assign_taxis: true }
+          });
 
-        const users = await prisma.user.findMany({
-          where: { role: { name: { not: 'b2b_user' } } },
-          take: 100,
-          orderBy: { created_at: 'desc' },
-          include: { role: true, _count: { select: { bookings: true } } }
-        });
+          const users = await tx.user.findMany({
+            where: { role: { name: { not: 'b2b_user' } } },
+            take: 100,
+            orderBy: { created_at: 'desc' },
+            include: { role: true, _count: { select: { bookings: true } } }
+          });
 
-        const drivers = await prisma.driver.findMany({
-          take: 100,
-          orderBy: { name: 'asc' }
-        });
+          const drivers = await tx.driver.findMany({
+            take: 100,
+            orderBy: { name: 'asc' }
+          });
 
-        const fleet = await prisma.fleet_vehicle.findMany({
-          where: { is_active: true }
-        });
+          const fleet = await tx.fleet_vehicle.findMany({
+            where: { is_active: true }
+          });
 
-        const b2bCompanies = await prisma.b2b_company.findMany({
-          take: 50,
-          orderBy: { company_name: 'asc' },
-          include: { _count: { select: { company_fleet: true } } }
-        });
+          const b2bCompanies = await tx.b2b_company.findMany({
+            take: 50,
+            orderBy: { company_name: 'asc' },
+            include: { _count: { select: { company_fleet: true } } }
+          });
 
-        const b2bRequests = await prisma.b2b_request.findMany({
-          take: 50,
-          orderBy: { created_at: 'desc' },
-          include: { company: { select: { id: true, company_name: true, company_email: true } } }
-        });
+          const b2bRequests = await tx.b2b_request.findMany({
+            take: 50,
+            orderBy: { created_at: 'desc' },
+            include: { company: { select: { id: true, company_name: true, company_email: true } } }
+          });
 
-        const b2bBookings = await prisma.b2b_booking.findMany({
-          take: 50,
-          orderBy: { created_at: 'desc' },
-          include: { company: true, bookedByUser: { select: { id: true, name: true, email: true, phone: true } }, assignments: true }
-        });
+          const b2bBookings = await tx.b2b_booking.findMany({
+            take: 50,
+            orderBy: { created_at: 'desc' },
+            include: { company: true, bookedByUser: { select: { id: true, name: true, email: true, phone: true } }, assignments: true }
+          });
 
-        const totalBookingsCount = await prisma.booking.count();
-        const activeDriversCount = await prisma.driver.count({ where: { is_active: true } });
-        const b2bBookingsCount = await prisma.b2b_booking.count();
+          const totalBookingsCount = await tx.booking.count();
+          const activeDriversCount = await tx.driver.count({ where: { is_active: true } });
+          const b2bBookingsCount = await tx.b2b_booking.count();
 
-        let paidCount = 0;
-        let pendingPaymentCount = 0;
-        let assignedCount = 0;
+          let paidCount = 0;
+          let pendingPaymentCount = 0;
+          let assignedCount = 0;
 
-        // Calculate actionable stats from the active bookings array
-        bookings.forEach(b => {
-          const isPaid = b.status === 'PAID' || (b.status === 'PENDING_PAYMENT' && b.payments?.some(p => p.status === 'SUCCESS'));
-          if (isPaid) {
-            paidCount++;
-            if (b.taxi_assign_status === 'ASSIGNED') assignedCount++;
-          } else {
-            pendingPaymentCount++;
-          }
-        });
+          bookings.forEach(b => {
+            const isPaid = b.status === 'PAID' || (b.status === 'PENDING_PAYMENT' && b.payments?.some(p => p.status === 'SUCCESS'));
+            if (isPaid) {
+              paidCount++;
+              if (b.taxi_assign_status === 'ASSIGNED') assignedCount++;
+            } else {
+              pendingPaymentCount++;
+            }
+          });
 
-        const readyToAssign = Math.max(0, paidCount - assignedCount);
+          const readyToAssign = Math.max(0, paidCount - assignedCount);
 
-        return {
-          bookings,
-          pendingPayments,
-          completedBookings,
-          cancelledBookings,
-          users,
-          drivers,
-          fleet,
-          b2bCompanies,
-          b2bRequests,
-          b2bBookings,
-          stats: {
-            totalBookings: totalBookingsCount,
-            completedBookings: completedBookings.length,
-            pendingBookings: pendingPayments.length,
-            actualPendingPayment: pendingPaymentCount,
-            paidCount,
-            readyToAssign,
-            b2bBookings: b2bBookingsCount,
-            activeDrivers: activeDriversCount
-          },
-          recentUsers: users.slice(0, 5) // Reuse the users array for recent users
-        };
+          return {
+            bookings,
+            pendingPayments,
+            completedBookings,
+            cancelledBookings,
+            users,
+            drivers,
+            fleet,
+            b2bCompanies,
+            b2bRequests,
+            b2bBookings,
+            stats: {
+              totalBookings: totalBookingsCount,
+              completedBookings: completedBookings.length,
+              pendingBookings: pendingPayments.length,
+              actualPendingPayment: pendingPaymentCount,
+              paidCount,
+              readyToAssign,
+              b2bBookings: b2bBookingsCount,
+              activeDrivers: activeDriversCount
+            },
+            recentUsers: users.slice(0, 5)
+          };
+        }, { timeout: 15000 }); // 15s max for the entire transaction
       },
       BOOKINGS_CACHE_TTL
     );

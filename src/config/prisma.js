@@ -13,8 +13,9 @@ function hardenDatabaseUrl(url) {
     // Only use pgbouncer=true if specifically using port 6543 (Supabase connection pooler)
     const isPgBouncer = cleanUrl.includes(':6543') ? '&pgbouncer=true' : '';
 
-    // PgBouncer multiplexes connections — 10 through PgBouncer > 20 direct
-    return `${cleanUrl}${separator}connection_limit=10&pool_timeout=30&connect_timeout=30${isPgBouncer}`;
+    // With PgBouncer transaction mode, 5 Prisma connections is plenty.
+    // PgBouncer multiplexes these into 20+ actual concurrent DB operations.
+    return `${cleanUrl}${separator}connection_limit=5&pool_timeout=20&connect_timeout=15${isPgBouncer}`;
 }
 
 const productionUrl = hardenDatabaseUrl(process.env.DATABASE_URL);
@@ -26,36 +27,52 @@ const prisma = new PrismaClient({
             url: process.env.NODE_ENV === 'production' ? productionUrl : devUrl
         }
     },
-    // Optionally log warnings/errors
     log: ['warn', 'error'],
 });
 
+// ═══════════════════════════════════════════════════════════════
+// P2024 RETRY WRAPPER
+// Auto-retries any database operation that fails with P2024
+// (connection pool timeout) using exponential backoff.
+// Usage: const result = await withRetry(() => prisma.user.findUnique({ ... }));
+// ═══════════════════════════════════════════════════════════════
+const MAX_RETRY_ATTEMPTS = 3;
+
+async function withRetry(fn, label = 'db-op') {
+    for (let attempt = 1; attempt <= MAX_RETRY_ATTEMPTS; attempt++) {
+        try {
+            return await fn();
+        } catch (error) {
+            if (error.code === 'P2024' && attempt < MAX_RETRY_ATTEMPTS) {
+                const delay = attempt * 500 + Math.random() * 300; // 500-800ms, 1000-1300ms
+                console.warn(`⚠️ P2024 retry ${attempt}/${MAX_RETRY_ATTEMPTS} for ${label} — waiting ${Math.round(delay)}ms`);
+                await new Promise(r => setTimeout(r, delay));
+                continue;
+            }
+            throw error;
+        }
+    }
+}
+
 // Maximum 2 retries for warm up
-const MAX_RETRIES = 2;
+const MAX_WARMUP_RETRIES = 2;
 
 async function warmupDatabase() {
     let lastError;
-    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    for (let attempt = 1; attempt <= MAX_WARMUP_RETRIES; attempt++) {
         try {
-            // Use prisma.$queryRaw instead of unsupported $queryRawUnsafe
             await prisma.$queryRaw`SELECT 1`;
             console.log('✅ Prisma database connection warmed up successfully.');
-            return; // Exit on success
+            return;
         } catch (error) {
             lastError = error;
-
-            // Fail fast mechanism for pool exhaustion
             if (error.code === 'P2024') {
                 console.error(`❌ Prisma pool exhausted (P2024). Failing fast on attempt ${attempt}...`);
                 throw error;
             }
-
-            console.warn(`⚠️ Prisma warmup retry ${attempt}/${MAX_RETRIES} failed: ${error.message}`);
-
-            // Wait with a small backoff before retrying
-            if (attempt < MAX_RETRIES) {
-                const delay = attempt * 1000;
-                await new Promise(r => setTimeout(r, delay));
+            console.warn(`⚠️ Prisma warmup retry ${attempt}/${MAX_WARMUP_RETRIES} failed: ${error.message}`);
+            if (attempt < MAX_WARMUP_RETRIES) {
+                await new Promise(r => setTimeout(r, attempt * 1000));
             }
         }
     }
@@ -75,5 +92,6 @@ process.on('SIGTERM', async () => {
     process.exit(0);
 });
 
-// Export a single PrismaClient instance
+// Export prisma client AND the retry wrapper
 module.exports = prisma;
+module.exports.withRetry = withRetry;
