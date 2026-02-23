@@ -1,14 +1,5 @@
 const { PrismaClient } = require('@prisma/client');
 
-// ═══════════════════════════════════════════════════════════════
-// DATABASE URL HARDENING
-// Supabase's PgBouncer aggressively kills idle connections (~60s).
-// We override pool parameters in the URL to ensure:
-//   - connection_limit=5  → Don't fight Supabase pooler for slots
-//   - pool_timeout=30     → More time for cold pooler to respond
-//   - pgbouncer=true      → Tell Prisma to use PgBouncer-compatible mode
-//   - connect_timeout=30  → Allow time for sleeping DB to wake
-// ═══════════════════════════════════════════════════════════════
 function hardenDatabaseUrl(url) {
     if (!url) return url;
     // Strip existing pool params to avoid conflicts
@@ -22,133 +13,67 @@ function hardenDatabaseUrl(url) {
     // Only use pgbouncer=true if specifically using port 6543 (Supabase connection pooler)
     const isPgBouncer = cleanUrl.includes(':6543') ? '&pgbouncer=true' : '';
 
-    return `${cleanUrl}${separator}connection_limit=5&pool_timeout=30&connect_timeout=30${isPgBouncer}`;
+    // Set connection limit to 20 as per your requirements
+    return `${cleanUrl}${separator}connection_limit=20&pool_timeout=30&connect_timeout=30${isPgBouncer}`;
 }
 
 const productionUrl = hardenDatabaseUrl(process.env.DATABASE_URL);
 const devUrl = hardenDatabaseUrl(process.env.DIRECT_URL || process.env.DATABASE_URL);
 
-const basePrisma = new PrismaClient({
+const prisma = new PrismaClient({
     datasources: {
         db: {
             url: process.env.NODE_ENV === 'production' ? productionUrl : devUrl
         }
     },
+    // Optionally log warnings/errors
     log: ['warn', 'error'],
 });
 
-// ═══════════════════════════════════════════════════════════════
-// GLOBAL RETRY via $extends — Auto-retries ALL queries on P2024
-// IMPORTANT: We do NOT call $disconnect/$connect in the retry loop!
-// That tears down the entire engine and kills all in-flight queries.
-// Instead, we just wait with exponential backoff and let Prisma's
-// internal pool naturally recover stale connections.
-// ═══════════════════════════════════════════════════════════════
-const MAX_RETRIES = 3;
+// Maximum 2 retries for warm up
+const MAX_RETRIES = 2;
 
-function isRetryableError(error) {
-    const code = error?.code || error?.errorCode;
-    // P2010 (Raw query failed), P1017 (Server closed connection)
-    // REMOVED P1001 (Can't reach db) and P1002 (Timeout) to enforce FAIL-FAST behavior.
-    // Retrying connection timeouts only amplifies the pool queue and causes cascading failure.
-    if (['P2010', 'P1017'].includes(code)) return true;
-
-    const name = error?.constructor?.name || '';
-    if (name === 'PrismaClientInitializationError') return true;
-
-    const msg = error?.message || '';
-    if (msg.includes('Engine is not yet connected')) return true;
-
-    return false;
-}
-
-async function retryOperation(operation, args, query) {
+async function warmupDatabase() {
     let lastError;
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
         try {
-            return await query(args);
+            // Use prisma.$queryRaw instead of unsupported $queryRawUnsafe
+            await prisma.$queryRaw`SELECT 1`;
+            console.log('✅ Prisma database connection warmed up successfully.');
+            return; // Exit on success
         } catch (error) {
             lastError = error;
-            if (!isRetryableError(error) || attempt === MAX_RETRIES) {
+
+            // Fail fast mechanism for pool exhaustion
+            if (error.code === 'P2024') {
+                console.error(`❌ Prisma pool exhausted (P2024). Failing fast on attempt ${attempt}...`);
                 throw error;
             }
-            const delay = Math.min(1000 * attempt, 5000); // 1s, 2s, 3s
-            console.warn(
-                `⚠️  Prisma retry ${attempt}/${MAX_RETRIES} | ${operation} | wait ${delay}ms | ${error?.constructor?.name}`
-            );
-            await new Promise(r => setTimeout(r, delay));
+
+            console.warn(`⚠️ Prisma warmup retry ${attempt}/${MAX_RETRIES} failed: ${error.message}`);
+
+            // Wait with a small backoff before retrying
+            if (attempt < MAX_RETRIES) {
+                const delay = attempt * 1000;
+                await new Promise(r => setTimeout(r, delay));
+            }
         }
     }
-    throw lastError;
+    console.error('❌ Failed to warm up Prisma database after maximum retries:', lastError?.message);
 }
 
-// Build retry handlers for all common Prisma operations
-const retryAllOperations = {};
-const PRISMA_OPERATIONS = [
-    'findUnique', 'findUniqueOrThrow', 'findFirst', 'findFirstOrThrow',
-    'findMany', 'create', 'createMany', 'update', 'updateMany',
-    'upsert', 'delete', 'deleteMany', 'count', 'aggregate', 'groupBy'
-];
+// Trigger warmup asynchronously
+warmupDatabase().catch(() => { });
 
-PRISMA_OPERATIONS.forEach(op => {
-    retryAllOperations[op] = ({ model, operation, args, query }) =>
-        retryOperation(`${model}.${operation}`, args, query);
-});
-
-const prisma = basePrisma.$extends({
-    query: {
-        $allModels: retryAllOperations
-    }
-});
-
-// ═══════════════════════════════════════════════════════════════
-// withRetry — For raw queries ($queryRawUnsafe) and non-model ops
-// ═══════════════════════════════════════════════════════════════
-async function withRetry(fn, maxRetries = 3) {
-    let lastError;
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
-        try {
-            return await fn();
-        } catch (error) {
-            lastError = error;
-            if (!isRetryableError(error) || attempt === maxRetries) throw error;
-            const delay = Math.min(1000 * attempt, 5000);
-            console.warn(`⚠️  withRetry ${attempt}/${maxRetries} after ${delay}ms`);
-            await new Promise(r => setTimeout(r, delay));
-        }
-    }
-    throw lastError;
-}
-
-// ═══════════════════════════════════════════════════════════════
-// GRACEFUL SHUTDOWN — Prevents connection leaks on Render restarts
-// ═══════════════════════════════════════════════════════════════
+// Handle graceful shutdown to avoid leaking connections
 process.on('SIGINT', async () => {
-    await basePrisma.$disconnect();
+    await prisma.$disconnect();
     process.exit(0);
 });
 process.on('SIGTERM', async () => {
-    await basePrisma.$disconnect();
+    await prisma.$disconnect();
     process.exit(0);
 });
 
-// ═══════════════════════════════════════════════════════════════
-// HEARTBEAT — Prevents Supabase PgBouncer from killing idle connections.
-// Supabase drops idle connections after ~60 seconds.
-// Ping every 30 seconds to keep at least one connection alive.
-// POOL-AWARE: Skip the ping if the pool is under pressure to avoid
-// competing with real requests during load spikes.
-// ═══════════════════════════════════════════════════════════════
-const concurrencyLimiter = require('../middlewares/concurrency.middleware');
-const heartbeatInterval = setInterval(() => {
-    // Skip heartbeat if pool is under pressure (3+ active requests out of 5 max)
-    if (concurrencyLimiter.getActiveCount && concurrencyLimiter.getActiveCount() >= 3) {
-        return;
-    }
-    basePrisma.$queryRawUnsafe('SELECT 1').catch(() => { });
-}, 30 * 1000); // 30 seconds
-
-if (heartbeatInterval.unref) heartbeatInterval.unref();
-
+// Export a single PrismaClient instance
 module.exports = prisma;
-module.exports.withRetry = withRetry;
