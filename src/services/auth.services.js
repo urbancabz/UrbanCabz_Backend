@@ -34,7 +34,7 @@ function toPublicUser(user, roleName) {
   };
 }
 
-async function register({ email,password, name, phone, roleName = 'customer' }) {
+async function register({ email, password, name, phone, roleName = 'customer' }) {
   // check existing
   const existing = await prisma.user.findUnique({ where: { email } });
   if (existing) throw { status: 409, message: 'Email already registered' };
@@ -76,8 +76,8 @@ async function register({ email,password, name, phone, roleName = 'customer' }) 
 }
 
 async function login({ email, password }) {
-  const user = await prisma.user.findUnique({ 
-    where: { email }, 
+  const user = await prisma.user.findUnique({
+    where: { email },
     select: {
       id: true,
       email: true,
@@ -99,13 +99,25 @@ async function login({ email, password }) {
   const ok = await bcrypt.compare(password, user.password_hash);  // Fixed: use password_hash
   if (!ok) throw { status: 401, message: 'Invalid Password' };
 
+  let companyId = null;
+  if (user.role?.name === 'b2b_user') {
+    const b2bUser = await prisma.b2b_user.findFirst({
+      where: { user_id: user.id },
+      select: { company_id: true }
+    });
+    if (b2bUser) companyId = b2bUser.company_id;
+  }
+
   // Note: Remove or fix the lastLoginAt update if that field doesn't exist in your schema
   // await prisma.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() }});
 
-  const token = signToken({ userId: user.id, role: user.role?.name || 'customer' });
+  const payload = { userId: user.id, role: user.role?.name || 'customer' };
+  if (companyId) payload.companyId = companyId;
+
+  const token = signToken(payload);
 
   // return user public fields + token
-  return { user: toPublicUser(user), token };
+  return { user: { ...toPublicUser(user), companyId }, token };
 }
 
 async function getProfile(userId) {

@@ -18,7 +18,8 @@ async function requireAuth(req, res, next) {
     // immediately cutting the connection pool pressure by 50%.
     req.user = {
       id: payload.userId,
-      role: payload.role || null
+      role: payload.role || null,
+      companyId: payload.companyId || null
     };
 
     return next();

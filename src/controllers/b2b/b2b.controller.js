@@ -401,25 +401,23 @@ const getCompanyById = async (req, res) => {
  */
 const getMyCompanyProfile = async (req, res) => {
     try {
-        const userId = req.user.id;
+        const companyId = req.user.companyId;
+        if (!companyId) return res.status(403).json({ success: false, message: 'Company not found' });
 
-        const b2bUser = await prisma.b2b_user.findFirst({
-            where: { user_id: userId },
-            include: {
-                company: true
-            }
+        const company = await prisma.b2b_company.findUnique({
+            where: { id: companyId }
         });
 
-        if (!b2bUser || !b2bUser.company) {
+        if (!company) {
             return res.status(404).json({
                 success: false,
-                message: 'Company association not found for this user'
+                message: 'Company profile not found'
             });
         }
 
         res.json({
             success: true,
-            data: b2bUser.company
+            data: company
         });
 
     } catch (error) {
@@ -440,24 +438,19 @@ const createCreditBooking = async (req, res) => {
     try {
         const userId = req.user.id;
         const bookingData = req.body;
+        const companyId = req.user.companyId;
 
-        // Verify B2B association
-        const b2bUser = await prisma.b2b_user.findFirst({
-            where: { user_id: userId },
-            include: { company: true }
-        });
-
-        if (!b2bUser || !b2bUser.company) {
+        if (!companyId) {
             return res.status(403).json({
                 success: false,
-                message: 'You are not authorized to make company bookings'
+                message: 'Company not found'
             });
         }
 
         // Create B2B booking in the dedicated table
         const booking = await prisma.b2b_booking.create({
             data: {
-                company_id: b2bUser.company.id,
+                company_id: companyId,
                 booked_by: userId,
                 pickup_location: bookingData.pickupLocation,
                 drop_location: bookingData.dropLocation,
@@ -488,22 +481,9 @@ const createCreditBooking = async (req, res) => {
 
 const getCompanyPayments = async (req, res) => {
     try {
-        const userId = req.user.id;
+        const companyId = req.user.companyId;
+        if (!companyId) return res.status(403).json({ success: false, message: 'Company not found' });
 
-        // Get user's company
-        const b2bUser = await prisma.b2b_user.findFirst({
-            where: { user_id: userId },
-            include: { company: true }
-        });
-
-        if (!b2bUser || !b2bUser.company) {
-            return res.status(403).json({
-                success: false,
-                message: 'Company not found for this user'
-            });
-        }
-
-        const companyId = b2bUser.company.id;
         const cacheKey = `company_payments_${companyId}`;
 
         // Fetch all Ledger Payments for this company (Cached)
@@ -563,29 +543,17 @@ const getCompanyPayments = async (req, res) => {
 
 const getCompanyBookings = async (req, res) => {
     try {
-        const userId = req.user.id;
+        const companyId = req.user.companyId;
+        if (!companyId) return res.status(403).json({ success: false, message: 'Company not found' });
 
-        // Get user's company
-        const b2bUser = await prisma.b2b_user.findFirst({
-            where: { user_id: userId },
-            include: { company: true }
-        });
-
-        if (!b2bUser || !b2bUser.company) {
-            return res.status(403).json({
-                success: false,
-                message: 'Company not found for this user'
-            });
-        }
-
-        const cacheKey = `company_bookings_${b2bUser.company.id}`;
+        const cacheKey = `company_bookings_${companyId}`;
 
         // Fetch all B2B bookings for this company (cached)
         const bookings = await cache.getOrSet(
             cacheKey,
             async () => {
                 return await prisma.b2b_booking.findMany({
-                    where: { company_id: b2bUser.company.id },
+                    where: { company_id: companyId },
                     orderBy: { created_at: 'desc' },
                     include: {
                         bookedByUser: {
@@ -620,19 +588,12 @@ const getCompanyBookings = async (req, res) => {
  */
 const getDashboardSync = async (req, res) => {
     try {
-        const userId = req.user.id;
+        const companyId = req.user.companyId;
+        if (!companyId) return res.status(403).json({ success: false, message: 'Company not found' });
 
         // 1. Get user's company (blocking dependency)
-        const b2bUser = await prisma.b2b_user.findFirst({
-            where: { user_id: userId },
-            include: { company: true }
-        });
-
-        if (!b2bUser || !b2bUser.company) {
-            return res.status(403).json({ success: false, message: 'Company not found for this user' });
-        }
-
-        const companyId = b2bUser.company.id;
+        const company = await prisma.b2b_company.findUnique({ where: { id: companyId } });
+        if (!company) return res.status(403).json({ success: false, message: 'Company details not found' });
 
         // 2. Fetch dependencies purely sequentially to strictly bound DB connection concurrency to 1 per request
         // Bookings (Cached)
@@ -673,7 +634,7 @@ const getDashboardSync = async (req, res) => {
         res.json({
             success: true,
             data: {
-                company: b2bUser.company,
+                company: company,
                 bookings: bookingsRes,
                 payments: paymentsRes,
                 billingSummary: {
@@ -830,24 +791,15 @@ const removeCompanyFleet = async (req, res) => {
  */
 const getMyFleet = async (req, res) => {
     try {
-        const userId = req.user.id;
-
-        // Get user's company
-        const b2bUser = await prisma.b2b_user.findFirst({
-            where: { user_id: userId },
-            include: { company: true }
-        });
-
-        if (!b2bUser || !b2bUser.company) {
-            return res.status(403).json({ success: false, message: 'Company not found' });
-        }
+        const companyId = req.user.companyId;
+        if (!companyId) return res.status(403).json({ success: false, message: 'Company not found' });
 
         // Fetch assigned fleet
-        console.log("[B2B Fleet] Fetching for company ID:", b2bUser.company.id);
+        console.log("[B2B Fleet] Fetching for company ID:", companyId);
 
         const assignedFleet = await prisma.b2b_company_fleet.findMany({
             where: {
-                company_id: b2bUser.company.id,
+                company_id: companyId,
                 is_active: true
             },
             include: {
@@ -859,7 +811,7 @@ const getMyFleet = async (req, res) => {
         if (assignedFleet.length === 0) {
             // Debug: Check total assignments
             const totalAssignments = await prisma.b2b_company_fleet.findMany({
-                where: { company_id: b2bUser.company.id }
+                where: { company_id: companyId }
             });
             console.log("[B2B Fleet] Total assignments (ignoring active):", totalAssignments.length);
             totalAssignments.forEach(a => {
