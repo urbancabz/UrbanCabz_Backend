@@ -23,7 +23,7 @@ function hardenDatabaseUrl(url) {
     const separator = cleanUrl.includes('?') ? '&' : '?';
 
     // Supabase session pooler + Prisma-safe settings.
-    return `${cleanUrl}${separator}connection_limit=5&pool_timeout=20&connect_timeout=15&pgbouncer=true&statement_cache_size=0&sslmode=require`;
+    return `${cleanUrl}${separator}connection_limit=5&pool_timeout=30&connect_timeout=30&pgbouncer=true&statement_cache_size=0&sslmode=require`;
 }
 
 const productionUrl = hardenDatabaseUrl(process.env.DATABASE_URL);
