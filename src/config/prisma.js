@@ -3,8 +3,15 @@ const { PrismaClient } = require('@prisma/client');
 function hardenDatabaseUrl(url) {
     if (!url) return url;
 
+    // Supabase Session Pooler (5432) is incompatible with Prisma + pgbouncer=true
+    // Force Prisma to use the Transaction Pooler (6543)
+    let processedUrl = url;
+    if (processedUrl.includes('.pooler.supabase.com:5432/')) {
+        processedUrl = processedUrl.replace('.pooler.supabase.com:5432/', '.pooler.supabase.com:6543/');
+    }
+
     // Strip existing pool/ssl params to avoid conflicts.
-    const cleanUrl = url
+    const cleanUrl = processedUrl
         .replace(/[&?]connection_limit=\d+/g, '')
         .replace(/[&?]pool_timeout=\d+/g, '')
         .replace(/[&?]connect_timeout=\d+/g, '')
