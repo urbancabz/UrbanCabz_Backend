@@ -611,8 +611,12 @@ const getDashboardSync = async (req, res) => {
         const companyId = req.user.companyId;
         if (!companyId) return res.status(403).json({ success: false, message: 'Company not found' });
 
-        // 1. Get user's company (blocking dependency)
-        const company = await prisma.b2b_company.findUnique({ where: { id: companyId } });
+        // 1. Get user's company (cached to avoid uncached DB hit on every dashboard load)
+        const company = await cache.getOrSet(
+            `b2b:company:${companyId}`,
+            async () => prisma.b2b_company.findUnique({ where: { id: companyId } }),
+            B2B_CACHE_TTL
+        );
         if (!company) return res.status(403).json({ success: false, message: 'Company details not found' });
 
         // 2. Fetch dependencies purely sequentially to strictly bound DB connection concurrency to 1 per request

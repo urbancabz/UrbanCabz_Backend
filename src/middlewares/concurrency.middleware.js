@@ -5,10 +5,10 @@
  * If all slots are busy, new requests wait in a FIFO queue instead of
  * blasting the Prisma connection pool and causing P2024 timeouts.
  *
- * MAX_CONCURRENT must be LESS than the Prisma connection_limit (5)
+ * MAX_CONCURRENT must be LESS than the Prisma connection_limit (8)
  * to leave room for heartbeat + system queries.
  */
-const MAX_CONCURRENT = 4; // Pool is 5 — leave 1 slot for heartbeat/system
+const MAX_CONCURRENT = 6; // Pool is 8 — leave 2 slots for startup/system queries
 const MAX_QUEUE = 50;     // Don't queue more than 50 requests
 
 let activeCount = 0;

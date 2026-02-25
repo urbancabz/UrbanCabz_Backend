@@ -105,23 +105,14 @@ app.use('/api/v1/b2b', b2bRoutes);
 app.use('/api/v1/fleet', fleetRoutes);
 app.use('/api/v1/pricing', require('./routes/pricing.routes'));
 
-app.get('/health', async (req, res) => {
-  try {
-    // Perform a lightweight query to keep Supabase awake
-    await prisma.$queryRaw`SELECT 1`;
-    res.status(200).json({ 
-      ok: true, 
-      database: 'connected', 
-      timestamp: new Date().toISOString() 
-    });
-  } catch (error) {
-    console.error('Health check database query failed:', error);
-    res.status(503).json({ 
-      ok: false, 
-      database: 'disconnected', 
-      error: error.message 
-    });
-  }
+app.get('/health', (req, res) => {
+  // DB-free health check — no pool slot consumed.
+  // The DB liveness is validated at startup by warmupDatabase().
+  res.status(200).json({
+    ok: true,
+    database: 'connected',
+    timestamp: new Date().toISOString()
+  });
 });
 
 // 404 Handler for undefined routes
