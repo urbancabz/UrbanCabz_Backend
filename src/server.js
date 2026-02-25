@@ -2,6 +2,7 @@ const path = require('path');
 require('dotenv').config({ path: path.resolve(__dirname, '../.env') });
 const app = require('./app');
 const prisma = require('./config/prisma');
+const { warmupDatabase } = require('./config/prisma');
 const cache = require('./utils/cache');
 
 const PORT = process.env.PORT || 5050;
@@ -46,23 +47,15 @@ async function preloadCaches() {
 async function startServer() {
     console.log('⏳ Warming up database connection...');
 
-    for (let attempt = 1; attempt <= 5; attempt++) {
-        try {
-            await prisma.$queryRawUnsafe('SELECT 1');
-            console.log('✅ Database connection established.');
+    try {
+        await warmupDatabase();
+        console.log('✅ Database connection established.');
 
-            // Preload caches AFTER warmup completes
-            await preloadCaches();
-
-            break;
-        } catch (err) {
-            console.warn(`⚠️  DB warm-up attempt ${attempt}/5 failed: ${err.message}`);
-            if (attempt === 5) {
-                console.error('❌ Could not connect to database after 5 attempts. Starting server anyway...');
-            } else {
-                await new Promise(r => setTimeout(r, 3000)); // Wait 3 seconds between retries
-            }
-        }
+        // Preload caches AFTER warmup completes
+        await preloadCaches();
+    } catch (err) {
+        console.error('❌ Could not connect to database during startup. Starting server anyway...');
+        console.error(err.message);
     }
 
     app.listen(PORT, () => console.log(`Server listening on ${PORT}`));

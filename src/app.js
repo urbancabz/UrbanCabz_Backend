@@ -6,7 +6,7 @@ const paymentRoutes = require('./routes/payment.routes');
 const adminRoutes = require('./routes/admin.routes');
 const b2bRoutes = require('./routes/b2b.routes');
 const fleetRoutes = require('./routes/fleet.routes');
-
+const prisma = require('./config/prisma');
 
 const cors = require('cors');
 const app = express();
@@ -105,7 +105,24 @@ app.use('/api/v1/b2b', b2bRoutes);
 app.use('/api/v1/fleet', fleetRoutes);
 app.use('/api/v1/pricing', require('./routes/pricing.routes'));
 
-app.get('/health', (req, res) => res.send({ ok: true }));
+app.get('/health', async (req, res) => {
+  try {
+    // Perform a lightweight query to keep Supabase awake
+    await prisma.$queryRaw`SELECT 1`;
+    res.status(200).json({ 
+      ok: true, 
+      database: 'connected', 
+      timestamp: new Date().toISOString() 
+    });
+  } catch (error) {
+    console.error('Health check database query failed:', error);
+    res.status(503).json({ 
+      ok: false, 
+      database: 'disconnected', 
+      error: error.message 
+    });
+  }
+});
 
 // 404 Handler for undefined routes
 app.use((req, res) => {

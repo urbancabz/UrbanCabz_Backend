@@ -20,26 +20,32 @@ const dedupe = (req, res, next) => {
     const key = req.originalUrl;
 
     // If an identical request is already in-flight, piggyback on its promise
-    if (inFlight.has(key)) {
-        inFlight.get(key).promise
-            .then(data => {
-                if (!res.headersSent) res.json(data);
-            })
-            .catch(() => {
-                if (!res.headersSent) next();
-            });
-        return;
-    }
+  if (inFlight.has(key)) {
+      inFlight.get(key).promise
+          .then(data => {
+              if (data && data.__dedupe_failed) {
+                  if (!res.headersSent) next();
+                  return;
+              }
+              if (!res.headersSent) res.json(data);
+          })
+          .catch(() => {
+              if (!res.headersSent) next();
+          });
+      return;
+  }
 
-    // Create a deferred promise for this request
-    let resolve, reject;
-    const promise = new Promise((r, rj) => { resolve = r; reject = rj; });
+  // Create a deferred promise for this request.
+  // This promise should never reject; rejection here can become unhandled
+  // (first request has no catch attached) and crash Node.
+  let resolve;
+  const promise = new Promise((r) => { resolve = r; });
 
-    // Safety: auto-cleanup after 10s in case response never fires
-    const timer = setTimeout(() => {
-        inFlight.delete(key);
-        reject(new Error('Dedupe timeout'));
-    }, STALE_TIMEOUT);
+  // Safety: auto-cleanup after 10s in case response never fires
+  const timer = setTimeout(() => {
+      inFlight.delete(key);
+      resolve({ __dedupe_failed: true });
+  }, STALE_TIMEOUT);
 
     inFlight.set(key, { promise, timer });
 
@@ -52,10 +58,10 @@ const dedupe = (req, res, next) => {
         return originalJson(data);
     };
 
-    // Handle errors/aborts
+    // Handle errors/aborts without rejecting (avoid unhandled rejections)
     const cleanup = () => {
         clearTimeout(timer);
-        reject(new Error('Response closed'));
+        resolve({ __dedupe_failed: true });
         inFlight.delete(key);
     };
 

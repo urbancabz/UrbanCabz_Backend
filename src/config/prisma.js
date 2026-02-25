@@ -2,19 +2,21 @@ const { PrismaClient } = require('@prisma/client');
 
 function hardenDatabaseUrl(url) {
     if (!url) return url;
-    // Strip existing pool params to avoid conflicts
-    let cleanUrl = url
+
+    // Strip existing pool/ssl params to avoid conflicts.
+    const cleanUrl = url
         .replace(/[&?]connection_limit=\d+/g, '')
         .replace(/[&?]pool_timeout=\d+/g, '')
         .replace(/[&?]connect_timeout=\d+/g, '')
-        .replace(/[&?]pgbouncer=\w+/g, '');
+        .replace(/[&?]pgbouncer=\w+/g, '')
+        .replace(/[&?]statement_cache_size=\d+/g, '')
+        .replace(/[&?]sslmode=[^&]+/g, '')
+        .replace(/\?&/, '?')
+        .replace(/[?&]$/, '');
     const separator = cleanUrl.includes('?') ? '&' : '?';
 
-    // Keep connection pool small — our caching, dedupe, withRetry, and $transaction
-    // ensure we never need more than 5 concurrent connections.
-    // NOTE: Port 6543 (transaction mode) is unreachable from Render.
-    // Using port 5432 (session mode pooler) which works fine.
-    return `${cleanUrl}${separator}connection_limit=5&pool_timeout=20&connect_timeout=15`;
+    // Supabase session pooler + Prisma-safe settings.
+    return `${cleanUrl}${separator}connection_limit=5&pool_timeout=20&connect_timeout=15&pgbouncer=true&statement_cache_size=0&sslmode=require`;
 }
 
 const productionUrl = hardenDatabaseUrl(process.env.DATABASE_URL);
@@ -78,8 +80,7 @@ async function warmupDatabase() {
     console.error('❌ Failed to warm up Prisma database after maximum retries:', lastError?.message);
 }
 
-// Trigger warmup asynchronously
-warmupDatabase().catch(() => { });
+// Warmup is triggered externally from server.js — do not auto-run here.
 
 // Handle graceful shutdown to avoid leaking connections
 process.on('SIGINT', async () => {
@@ -91,6 +92,7 @@ process.on('SIGTERM', async () => {
     process.exit(0);
 });
 
-// Export prisma client AND the retry wrapper
+// Export prisma client and helpers
 module.exports = prisma;
 module.exports.withRetry = withRetry;
+module.exports.warmupDatabase = warmupDatabase;
