@@ -1,9 +1,3 @@
-databases:
-  - name: urban-cabz-db
-    databaseName: urban_cabz
-    user: urban_cabz_user
-    plan: free # or 'starter' if you need persistence exceeding free tier limits
-
 services:
   - type: web
     name: urban-cabz-backend
@@ -15,12 +9,42 @@ services:
       - key: NODE_ENV
         value: production
       - key: DATABASE_URL
-        fromDatabase:
-          name: urban-cabz-db
-          property: connectionString
+        sync: false
+      - key: DIRECT_URL
+        sync: false
       - key: JWT_SECRET
-        generate: true
+        sync: false
       - key: RAZORPAY_KEY_ID
         sync: false
       - key: RAZORPAY_KEY_SECRET
+        sync: false
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_WHATSAPP_FROM
+        sync: false
+      - key: TWILIO_RESET_CONTENT_SID
+        sync: false
+      - key: MAPPLS_CLIENT_ID
+        sync: false
+      - key: MAPPLS_CLIENT_SECRET
+        sync: false
+      - key: MAPPLS_MAP_KEY
+        sync: false
+      - key: CLOUDINARY_CLOUD_NAME
+        sync: false
+      - key: CLOUDINARY_API_KEY
+        sync: false
+      - key: CLOUDINARY_API_SECRET
+        sync: false
+      - key: FAST2SMS_API_KEY
+        sync: false
+      - key: EMAIL_HOST
+        sync: false
+      - key: EMAIL_PORT
+        sync: false
+      - key: EMAIL_USER
+        sync: false
+      - key: EMAIL_PASS
         sync: false
