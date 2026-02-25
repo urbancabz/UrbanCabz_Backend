@@ -1,4 +1,5 @@
 const prisma = require('../config/prisma');
+const cache = require('../utils/cache');
 
 // ===================== BOOKING LIFECYCLE MANAGEMENT =====================
 
@@ -48,6 +49,13 @@ const updateBookingStatus = async (req, res) => {
                 reason: reason || `Status changed from ${oldStatus} to ${status}`
             }
         });
+
+        cache.invalidate('admin:bookings');
+        cache.invalidate('admin:bookings_100');
+        cache.invalidate('admin:dashboard_sync');
+        cache.invalidate('admin:completed_bookings_50');
+        cache.invalidate('admin:cancelled_bookings_50');
+        cache.invalidate('admin:pending_payments_50');
 
         res.json({ success: true, data: { booking: updated }, message: `Booking status updated to ${status}` });
     } catch (error) {
@@ -141,6 +149,13 @@ const completeTrip = async (req, res) => {
             }
         });
 
+        cache.invalidate('admin:bookings');
+        cache.invalidate('admin:bookings_100');
+        cache.invalidate('admin:dashboard_sync');
+        cache.invalidate('admin:completed_bookings_50');
+        cache.invalidate('admin:cancelled_bookings_50');
+        cache.invalidate('admin:pending_payments_50');
+
         res.json({
             success: true,
             data: {
@@ -204,6 +219,13 @@ const cancelBooking = async (req, res) => {
                 reason
             }
         });
+
+        cache.invalidate('admin:bookings');
+        cache.invalidate('admin:bookings_100');
+        cache.invalidate('admin:dashboard_sync');
+        cache.invalidate('admin:completed_bookings_50');
+        cache.invalidate('admin:cancelled_bookings_50');
+        cache.invalidate('admin:pending_payments_50');
 
         res.json({ success: true, data: { booking: updated }, message: 'Booking cancelled successfully' });
     } catch (error) {
