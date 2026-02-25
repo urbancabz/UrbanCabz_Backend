@@ -1,27 +1,35 @@
 // src/services/email.service.js
 const nodemailer = require('nodemailer');
 
-const { EMAIL_HOST, EMAIL_PORT, EMAIL_USER, EMAIL_PASS } = process.env;
+const { EMAIL_HOST, EMAIL_PORT, EMAIL_USER, EMAIL_PASS, EMAIL_VERIFY_ON_BOOT } = process.env;
 
-// Create reusable transporter object using the default SMTP transport
+const parsedEmailPort = Number(EMAIL_PORT || 587);
+
+// Create reusable transporter object using SMTP transport
 const transporter = nodemailer.createTransport({
     host: EMAIL_HOST,
-    port: EMAIL_PORT,
-    secure: EMAIL_PORT == 465, // true for 465, false for other ports
+    port: parsedEmailPort,
+    secure: parsedEmailPort === 465, // true for 465, false for STARTTLS ports like 587
+    requireTLS: parsedEmailPort !== 465,
+    connectionTimeout: 10000,
+    greetingTimeout: 10000,
+    socketTimeout: 20000,
     auth: {
         user: EMAIL_USER,
         pass: EMAIL_PASS,
     },
 });
 
-// Verify connection configuration
-transporter.verify(function (error, success) {
-    if (error) {
-        console.error('❌ Email Server Connection Error:', error);
-    } else {
-        console.log('✅ Email Server is ready to take our messages');
-    }
-});
+// Optional boot-time SMTP check; keep disabled by default on Render
+if (EMAIL_VERIFY_ON_BOOT === 'true') {
+    transporter.verify(function (error) {
+        if (error) {
+            console.error('❌ Email Server Connection Error:', error);
+        } else {
+            console.log('✅ Email Server is ready to take our messages');
+        }
+    });
+}
 
 /**
  * Send a generic email

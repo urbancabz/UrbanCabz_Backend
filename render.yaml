@@ -48,3 +48,5 @@ services:
         sync: false
       - key: EMAIL_PASS
         sync: false
+      - key: EMAIL_VERIFY_ON_BOOT
+        sync: false
