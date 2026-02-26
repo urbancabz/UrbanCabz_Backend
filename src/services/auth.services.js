@@ -1,6 +1,5 @@
 // src/services/auth.service.js
 const prisma = require('../config/prisma');
-const { withRetry } = require('../config/prisma');
 const bcrypt = require('bcryptjs');
 const { signToken } = require('../utils/jwt');
 
@@ -37,11 +36,11 @@ function toPublicUser(user, roleName) {
 
 async function register({ email, password, name, phone, roleName = 'customer' }) {
   // check existing
-  const existing = await withRetry(() => prisma.user.findUnique({ where: { email } }), 'register-check');
+  const existing = await prisma.user.findUnique({ where: { email } });
   if (existing) throw { status: 409, message: 'Email already registered' };
 
   // find role
-  let role = await withRetry(() => prisma.role.findUnique({ where: { name: roleName } }), 'register-role');
+  let role = await prisma.role.findUnique({ where: { name: roleName } });
   if (!role) {
     role = await prisma.role.create({ data: { name: roleName } });
   }
@@ -76,7 +75,7 @@ async function register({ email, password, name, phone, roleName = 'customer' })
 }
 
 async function login({ email, password }) {
-  const user = await withRetry(() => prisma.user.findUnique({
+  const user = await prisma.user.findUnique({
     where: { email },
     select: {
       id: true,
@@ -91,7 +90,7 @@ async function login({ email, password }) {
         }
       }
     }
-  }), 'login');
+  });
   if (!user) throw { status: 401, message: 'Invalid Email' };
 
   if (!user.password_hash) throw { status: 401, message: 'No password set for this user' };
@@ -101,10 +100,10 @@ async function login({ email, password }) {
 
   let companyId = null;
   if (user.role?.name === 'b2b_user') {
-    const b2bUser = await withRetry(() => prisma.b2b_user.findFirst({
+    const b2bUser = await prisma.b2b_user.findFirst({
       where: { user_id: user.id },
       select: { company_id: true }
-    }), 'login-b2b-lookup');
+    });
     if (b2bUser) companyId = b2bUser.company_id;
   }
 
