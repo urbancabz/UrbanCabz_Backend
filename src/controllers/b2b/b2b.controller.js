@@ -643,11 +643,15 @@ const getDashboardSync = async (req, res) => {
             B2B_CACHE_TTL
         );
 
-        // Fleet (Live, small query)
-        const fleetRes = await prisma.b2b_company_fleet.findMany({
-            where: { company_id: companyId, is_active: true },
-            include: { vehicle: true }
-        });
+        // Fleet (Cached — same TTL as bookings/payments)
+        const fleetRes = await cache.getOrSet(
+            `b2b:my_fleet:${companyId}`,
+            () => prisma.b2b_company_fleet.findMany({
+                where: { company_id: companyId, is_active: true },
+                include: { vehicle: true }
+            }),
+            B2B_CACHE_TTL
+        );
 
         // 3. Calculate lightweight billing summary locally without extra DB hits
         let totalBilled = 0;

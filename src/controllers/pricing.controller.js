@@ -1,8 +1,9 @@
 const prisma = require('../config/prisma');
+const { withRetry } = require('../config/prisma');
 const cache = require('../utils/cache');
 
 const PRICING_CACHE_KEY = 'pricing_settings';
-const PRICING_CACHE_TTL = 5 * 60; // 5 minutes in seconds
+const PRICING_CACHE_TTL = 30 * 60; // 30 minutes — pricing rarely changes; long TTL reduces stampede risk
 
 // Get Global Pricing Settings (cached - avoids DB hit on every page load)
 const getPricingSettings = async (req, res) => {
@@ -11,10 +12,13 @@ const getPricingSettings = async (req, res) => {
         const settings = await cache.getOrSet(
             PRICING_CACHE_KEY,
             async () => {
-                let dbSettings = await prisma.pricing_settings.findFirst();
+                let dbSettings = await withRetry(
+                    () => prisma.pricing_settings.findFirst(),
+                    'pricing_settings.findFirst'
+                );
 
                 if (!dbSettings) {
-                    dbSettings = await prisma.pricing_settings.create({
+                    dbSettings = await withRetry(() => prisma.pricing_settings.create({
                         data: {
                             min_km_threshold: 100.0,
                             min_km_airport_apply: false,
@@ -24,7 +28,7 @@ const getPricingSettings = async (req, res) => {
                             service_oneway_enabled: true,
                             service_roundtrip_enabled: true
                         }
-                    });
+                    }), 'pricing_settings.create');
                 }
                 return dbSettings;
             },

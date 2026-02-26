@@ -23,7 +23,10 @@ function hardenDatabaseUrl(url) {
     const separator = cleanUrl.includes('?') ? '&' : '?';
 
     // Supabase session pooler + Prisma-safe settings.
-    return `${cleanUrl}${separator}connection_limit=8&pool_timeout=30&connect_timeout=30&pgbouncer=true&statement_cache_size=0&sslmode=require`;
+    // connection_limit=3: PgBouncer multiplexes; 3 client slots are enough for a single Render dyno.
+    // pool_timeout=10:    Fail fast to let withRetry() handle retries instead of blocking the queue.
+    // connect_timeout=15: Supabase cold starts can take up to 10s; 15s gives safe headroom.
+    return `${cleanUrl}${separator}connection_limit=3&pool_timeout=10&connect_timeout=15&pgbouncer=true&statement_cache_size=0&sslmode=require`;
 }
 
 const productionUrl = hardenDatabaseUrl(process.env.DATABASE_URL);
@@ -44,7 +47,7 @@ const prisma = new PrismaClient({
 // (connection pool timeout) using exponential backoff.
 // Usage: const result = await withRetry(() => prisma.user.findUnique({ ... }));
 // ═══════════════════════════════════════════════════════════════
-const MAX_RETRY_ATTEMPTS = 3;
+const MAX_RETRY_ATTEMPTS = 5;
 
 async function withRetry(fn, label = 'db-op') {
     for (let attempt = 1; attempt <= MAX_RETRY_ATTEMPTS; attempt++) {
@@ -52,7 +55,7 @@ async function withRetry(fn, label = 'db-op') {
             return await fn();
         } catch (error) {
             if (error.code === 'P2024' && attempt < MAX_RETRY_ATTEMPTS) {
-                const delay = attempt * 500 + Math.random() * 300; // 500-800ms, 1000-1300ms
+                const delay = attempt * 1000 + Math.random() * 500; // 1-1.5s, 2-2.5s, 3-3.5s, 4-4.5s
                 console.warn(`⚠️ P2024 retry ${attempt}/${MAX_RETRY_ATTEMPTS} for ${label} — waiting ${Math.round(delay)}ms`);
                 await new Promise(r => setTimeout(r, delay));
                 continue;

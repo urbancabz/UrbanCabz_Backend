@@ -2,7 +2,7 @@ const path = require('path');
 require('dotenv').config({ path: path.resolve(__dirname, '../.env') });
 const app = require('./app');
 const prisma = require('./config/prisma');
-const { warmupDatabase } = require('./config/prisma');
+const { warmupDatabase, withRetry } = require('./config/prisma');
 const cache = require('./utils/cache');
 
 const PORT = process.env.PORT || 5050;
@@ -15,23 +15,34 @@ async function preloadCaches() {
     try {
         console.log('⏳ Preloading caches...');
 
-        // Pricing settings — cached for 5 minutes
-        const pricing = await prisma.pricing_settings.findFirst();
+        // Pricing settings — cached for 30 minutes (matches PRICING_CACHE_TTL in controller)
+        const pricing = await withRetry(() => prisma.pricing_settings.findFirst(), 'preload:pricing');
         if (pricing) {
-            cache.set('pricing_settings', pricing, 300);
+            cache.set('pricing_settings', pricing, 30 * 60);
             console.log('  ✅ Pricing cache loaded');
         }
 
+        // Small delay between preload queries to avoid bursting all pool connections at once
+        await new Promise(r => setTimeout(r, 500));
+
         // Active fleet — cached for 2 minutes
-        const fleet = await prisma.fleet_vehicle.findMany({
+        const fleet = await withRetry(() => prisma.fleet_vehicle.findMany({
             where: { is_active: true },
             orderBy: { category: 'asc' }
-        });
+        }), 'preload:fleet_active');
         cache.set('fleet_vehicles_true', fleet, 120);
-        cache.set('fleet_vehicles_all', await prisma.fleet_vehicle.findMany({ orderBy: { category: 'asc' } }), 120);
-        console.log(`  ✅ Fleet cache loaded (${fleet.length} vehicles)`);
+        console.log(`  ✅ Active fleet cache loaded (${fleet.length} vehicles)`);
 
-        console.log('✅ All caches preloaded');
+        await new Promise(r => setTimeout(r, 500));
+
+        // All fleet vehicles — cached for 2 minutes
+        const allFleet = await withRetry(() => prisma.fleet_vehicle.findMany({
+            orderBy: { category: 'asc' }
+        }), 'preload:fleet_all');
+        cache.set('fleet_vehicles_all', allFleet, 120);
+        console.log(`  ✅ All fleet cache loaded (${allFleet.length} vehicles)`);
+
+        console.log('✅ All caches preloaded successfully');
     } catch (err) {
         console.warn('⚠️  Cache preload failed, will load on first request:', err.message);
     }
