@@ -6,6 +6,18 @@ const bookingService = require('../../services/booking.services');
 const B2B_CACHE_TTL = 65; // 65 seconds — fresh enough for admin dashboard, safely outlasts 60s poll
 
 /**
+ * Normalize phone: accept +91XXXXXXXXXX or 91XXXXXXXXXX or XXXXXXXXXX
+ * Always store as plain 10-digit number for consistency.
+ */
+function normalizePhone(phone) {
+    if (!phone) return phone;
+    const digits = String(phone).replace(/\D/g, '');
+    if (digits.length === 12 && digits.startsWith('91')) return digits.slice(2); // 919876543210 -> 9876543210
+    if (digits.length === 10) return digits;  // already 10 digits, clean
+    return String(phone).trim(); // unknown format, keep as-is
+}
+
+/**
  * @route   POST /api/b2b/register
  * @desc    Submit B2B company registration request from contact form
  * @access  Public
@@ -39,7 +51,7 @@ const registerB2BRequest = async (req, res) => {
             data: {
                 contact_name: name,
                 contact_email: email,
-                contact_phone: phone,
+                contact_phone: normalizePhone(phone), // Normalize: +91XXXXXXXXXX → XXXXXXXXXX
                 company_name: company,
                 message: message || null,
                 status: 'PENDING'
@@ -461,18 +473,21 @@ const createCreditBooking = async (req, res) => {
             });
         }
 
+        // Accept both camelCase (carModel) and snake_case (car_model) from frontend
+        const carModel = bookingData.carModel || bookingData.car_model || null;
+
         // Create B2B booking in the dedicated table
         const booking = await prisma.b2b_booking.create({
             data: {
                 company_id: companyId,
                 booked_by: userId,
-                pickup_location: bookingData.pickupLocation,
-                drop_location: bookingData.dropLocation,
+                pickup_location: bookingData.pickupLocation || bookingData.pickup_location,
+                drop_location: bookingData.dropLocation || bookingData.drop_location,
                 scheduled_at: bookingData.scheduledAt ? new Date(bookingData.scheduledAt) : null,
-                distance_km: bookingData.distanceKm || null,
-                estimated_fare: bookingData.estimatedFare || null,
-                total_amount: bookingData.totalAmount,
-                car_model: bookingData.carModel || null,
+                distance_km: bookingData.distanceKm || bookingData.distance_km || null,
+                estimated_fare: bookingData.estimatedFare || bookingData.estimated_fare || null,
+                total_amount: bookingData.totalAmount || bookingData.total_amount,
+                car_model: carModel,
                 status: 'CONFIRMED',
                 taxi_assign_status: 'NOT_ASSIGNED'
             }
