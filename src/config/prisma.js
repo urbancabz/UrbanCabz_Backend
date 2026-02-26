@@ -1,98 +1,30 @@
 const { PrismaClient } = require('@prisma/client');
 
-function hardenDatabaseUrl(url) {
-    if (!url) return url;
-
-    // Supabase Session Pooler (5432) is incompatible with Prisma + pgbouncer=true
-    // Force Prisma to use the Transaction Pooler (6543)
-    let processedUrl = url;
-    if (processedUrl.includes('.pooler.supabase.com:5432/')) {
-        processedUrl = processedUrl.replace('.pooler.supabase.com:5432/', '.pooler.supabase.com:6543/');
-    }
-
-    // Strip existing pool/ssl params to avoid conflicts.
-    const cleanUrl = processedUrl
-        .replace(/[&?]connection_limit=\d+/g, '')
-        .replace(/[&?]pool_timeout=\d+/g, '')
-        .replace(/[&?]connect_timeout=\d+/g, '')
-        .replace(/[&?]pgbouncer=\w+/g, '')
-        .replace(/[&?]statement_cache_size=\d+/g, '')
-        .replace(/[&?]sslmode=[^&]+/g, '')
-        .replace(/\?&/, '?')
-        .replace(/[?&]$/, '');
-    const separator = cleanUrl.includes('?') ? '&' : '?';
-
-    // Supabase session pooler + Prisma-safe settings.
-    // connection_limit=3: PgBouncer multiplexes; 3 client slots are enough for a single Render dyno.
-    // pool_timeout=10:    Fail fast to let withRetry() handle retries instead of blocking the queue.
-    // connect_timeout=15: Supabase cold starts can take up to 10s; 15s gives safe headroom.
-    return `${cleanUrl}${separator}connection_limit=3&pool_timeout=10&connect_timeout=15&pgbouncer=true&statement_cache_size=0&sslmode=require`;
-}
-
-const productionUrl = hardenDatabaseUrl(process.env.DATABASE_URL);
-const devUrl = hardenDatabaseUrl(process.env.DIRECT_URL || process.env.DATABASE_URL);
-
+/**
+ * Single shared PrismaClient instance.
+ * DATABASE_URL is set directly in Render environment variables.
+ * No URL manipulation here — what you set in Render is exactly what Prisma uses.
+ */
 const prisma = new PrismaClient({
-    datasources: {
-        db: {
-            url: process.env.NODE_ENV === 'production' ? productionUrl : devUrl
-        }
-    },
-    log: ['warn', 'error'],
+    log: ['error'],
 });
 
-// ═══════════════════════════════════════════════════════════════
-// P2024 RETRY WRAPPER
-// Auto-retries any database operation that fails with P2024
-// (connection pool timeout) using exponential backoff.
-// Usage: const result = await withRetry(() => prisma.user.findUnique({ ... }));
-// ═══════════════════════════════════════════════════════════════
-const MAX_RETRY_ATTEMPTS = 5;
-
-async function withRetry(fn, label = 'db-op') {
-    for (let attempt = 1; attempt <= MAX_RETRY_ATTEMPTS; attempt++) {
-        try {
-            return await fn();
-        } catch (error) {
-            if (error.code === 'P2024' && attempt < MAX_RETRY_ATTEMPTS) {
-                const delay = attempt * 1000 + Math.random() * 500; // 1-1.5s, 2-2.5s, 3-3.5s, 4-4.5s
-                console.warn(`⚠️ P2024 retry ${attempt}/${MAX_RETRY_ATTEMPTS} for ${label} — waiting ${Math.round(delay)}ms`);
-                await new Promise(r => setTimeout(r, delay));
-                continue;
-            }
-            throw error;
-        }
+/**
+ * Warm up the database connection at startup.
+ * A single lightweight query to verify the pool is ready before traffic arrives.
+ * Logs a warning and continues if it fails — the server will still start.
+ */
+const warmupDatabase = async () => {
+    console.log('⏳ Warming up database connection...');
+    try {
+        await prisma.$queryRaw`SELECT 1`;
+        console.log('✅ Prisma database connection warmed up successfully.');
+    } catch (err) {
+        console.warn('⚠️ Warm-up failed, continuing anyway:', err.message);
     }
-}
+};
 
-// Maximum 2 retries for warm up
-const MAX_WARMUP_RETRIES = 2;
-
-async function warmupDatabase() {
-    let lastError;
-    for (let attempt = 1; attempt <= MAX_WARMUP_RETRIES; attempt++) {
-        try {
-            await prisma.$queryRaw`SELECT 1`;
-            console.log('✅ Prisma database connection warmed up successfully.');
-            return;
-        } catch (error) {
-            lastError = error;
-            if (error.code === 'P2024') {
-                console.error(`❌ Prisma pool exhausted (P2024). Failing fast on attempt ${attempt}...`);
-                throw error;
-            }
-            console.warn(`⚠️ Prisma warmup retry ${attempt}/${MAX_WARMUP_RETRIES} failed: ${error.message}`);
-            if (attempt < MAX_WARMUP_RETRIES) {
-                await new Promise(r => setTimeout(r, attempt * 1000));
-            }
-        }
-    }
-    console.error('❌ Failed to warm up Prisma database after maximum retries:', lastError?.message);
-}
-
-// Warmup is triggered externally from server.js — do not auto-run here.
-
-// Handle graceful shutdown to avoid leaking connections
+// Graceful shutdown — release DB connections cleanly
 process.on('SIGINT', async () => {
     await prisma.$disconnect();
     process.exit(0);
@@ -102,7 +34,6 @@ process.on('SIGTERM', async () => {
     process.exit(0);
 });
 
-// Export prisma client and helpers
+// Default export = prisma client (backward compatible with all existing requires)
 module.exports = prisma;
-module.exports.withRetry = withRetry;
 module.exports.warmupDatabase = warmupDatabase;
