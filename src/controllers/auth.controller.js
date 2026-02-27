@@ -14,21 +14,9 @@ async function register(req, res) {
     const { email, password, name, phone } = req.body;
     const result = await authService.register({ email, password, name, phone, roleName: 'customer' });
 
-    // Automatically send verification OTP after signup
-    try {
-      if (result.user && result.user.id) {
-        await verificationService.sendVerificationOtp(result.user.id);
-        result.verificationPending = true;
-
-        // Send Welcome Email (fire-and-forget — never block response for SMTP)
-        emailService.sendWelcomeEmail(result.user)
-          .catch(err => console.error('Welcome email failed:', err.message));
-      }
-    } catch (otpErr) {
-      console.error('Failed to send initial signup OTP/Email:', otpErr);
-      // Don't fail the registration, just log it. User can request OTP later.
-      result.verificationWarning = 'Account created but failed to send OTP. Please verify manually.';
-    }
+    // Note: Automatic OTP and Welcome Email removed from registration 
+    // to avoid failures on Render when SMS/Email services are unconfigured.
+    // Users can be verified later via the /resend-verification-otp endpoint.
 
     return res.status(201).json(result);
   } catch (err) {
