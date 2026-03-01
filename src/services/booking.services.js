@@ -119,6 +119,61 @@ async function createBookingWithPendingPayment({
 }
 
 /**
+ * Create a direct booking without upfront payment (bypassing Razorpay)
+ * Sets booking status to PENDING_PAYMENT and creates a PENDING payment record.
+ */
+async function createDirectBooking({
+  userId,
+  pickupLocation,
+  dropLocation,
+  scheduledAt,
+  distanceKm,
+  estimatedFare,
+  totalAmount,
+  carModel
+}) {
+  if (!userId) throw { status: 400, message: 'userId is required' };
+  if (!pickupLocation || !dropLocation) {
+    throw { status: 400, message: 'pickupLocation and dropLocation are required' };
+  }
+  if (totalAmount === undefined || totalAmount === null) {
+    throw { status: 400, message: 'totalAmount is required' };
+  }
+
+  // Transaction to ensure booking and payment records are consistent
+  const [booking] = await prisma.$transaction([
+    prisma.booking.create({
+      data: {
+        user_id: userId,
+        pickup_location: pickupLocation,
+        drop_location: dropLocation,
+        scheduled_at: scheduledAt || null,
+        distance_km: distanceKm || null,
+        estimated_fare: estimatedFare || null,
+        total_amount: totalAmount,
+        car_model: carModel || null,
+        status: 'PENDING_PAYMENT',
+        payments: {
+          create: {
+            amount: 0, // No amount paid yet
+            currency: 'INR',
+            status: 'PENDING',
+            provider: 'pay_later', // Used to signify this was booked without upfront payment
+            remaining_amount: totalAmount // Full amount remains
+          }
+        }
+      },
+      include: {
+        payments: true,
+        user: true // Include user to be used later for email/SMS notifications
+      }
+    })
+  ]);
+
+  return booking;
+}
+
+/**
  * Update booking and payment to SUCCESS after payment verification
  * Called when Razorpay payment succeeds
  */
@@ -217,6 +272,7 @@ async function getCompanyBookings(companyId) {
 module.exports = {
   createBookingAfterPayment,
   createBookingWithPendingPayment,
+  createDirectBooking,
   updateBookingAfterPaymentSuccess,
   getMyBookings,
   getCompanyBookings
