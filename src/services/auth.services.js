@@ -74,7 +74,7 @@ async function register({ email, password, name, phone, roleName = 'customer' })
   return { user: toPublicUser(user, role.name), token };
 }
 
-async function login({ email, password }) {
+async function login({ email, password, loginType = 'customer' }) {
   const user = await prisma.user.findUnique({
     where: { email },
     select: {
@@ -100,6 +100,7 @@ async function login({ email, password }) {
 
   let companyId = null;
   if (user.role?.name === 'b2b_user') {
+    if (loginType !== 'b2b') throw { status: 403, message: 'This login is not for B2B users' };
     const b2bUser = await prisma.b2b_user.findFirst({
       where: { user_id: user.id },
       select: { company_id: true }
@@ -114,7 +115,6 @@ async function login({ email, password }) {
   if (companyId) payload.companyId = companyId;
 
   const token = signToken(payload);
-
   // return user public fields + token
   return { user: { ...toPublicUser(user), companyId }, token };
 }
