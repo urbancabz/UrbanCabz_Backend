@@ -5,6 +5,26 @@ const FLEET_CACHE_TTL = 120; // 2 minutes — fleet changes infrequently
 const FLEET_CACHE_KEY_BASE = 'fleet_vehicles';
 
 const isPoolTimeoutError = (error) => error?.code === 'P2024';
+const isDatabaseUnavailableError = (error) => error?.code === 'P1001';
+const isRecordNotFoundError = (error) => error?.code === 'P2025';
+
+const handlePrismaAvailabilityErrors = (res, error, fallbackMessage) => {
+    if (isDatabaseUnavailableError(error)) {
+        return res.status(503).json({
+            success: false,
+            message: 'Database temporarily unavailable. Please retry in a few seconds.'
+        });
+    }
+
+    if (isPoolTimeoutError(error)) {
+        return res.status(503).json({
+            success: false,
+            message: 'Database is busy. Please retry in a few seconds.'
+        });
+    }
+
+    return res.status(500).json({ success: false, message: fallbackMessage });
+};
 
 // ===================== FLEET VEHICLE CRUD =====================
 
@@ -56,7 +76,7 @@ const getFleetVehicle = async (req, res) => {
 const createFleetVehicle = async (req, res) => {
     try {
         const {
-            name, seats, base_price_per_km, category, description, image_url, is_active,
+            name, seats, base_price_per_km, base_price_airport, category, description, image_url, is_active,
             min_km_threshold, min_km_airport_apply, min_km_oneway_apply, min_km_roundtrip_apply
         } = req.body;
 
@@ -69,6 +89,7 @@ const createFleetVehicle = async (req, res) => {
                 name,
                 seats: parseInt(seats),
                 base_price_per_km: parseFloat(base_price_per_km),
+                ...(base_price_airport !== undefined && { base_price_airport: parseFloat(base_price_airport) }),
                 category,
                 description: description || null,
                 image_url: image_url || null,
@@ -97,7 +118,7 @@ const createFleetVehicle = async (req, res) => {
         res.status(201).json({ success: true, data: { vehicle }, message: 'Vehicle created successfully' });
     } catch (error) {
         console.error('Error creating vehicle:', error);
-        res.status(500).json({ success: false, message: 'Failed to create vehicle' });
+        return handlePrismaAvailabilityErrors(res, error, 'Failed to create vehicle');
     }
 };
 
@@ -105,23 +126,20 @@ const createFleetVehicle = async (req, res) => {
 const updateFleetVehicle = async (req, res) => {
     try {
         const { id } = req.params;
+        const vehicleId = parseInt(id, 10);
         const {
-            name, seats, base_price_per_km, category, description, image_url, is_active,
+            name, seats, base_price_per_km, base_price_airport, category, description, image_url, is_active,
             min_km_threshold, min_km_airport_apply, min_km_oneway_apply, min_km_roundtrip_apply
         } = req.body;
 
-        const existing = await prisma.fleet_vehicle.findUnique({ where: { id: parseInt(id) } });
-        if (!existing) {
-            return res.status(404).json({ success: false, message: 'Vehicle not found' });
-        }
-
         const vehicle = await prisma.fleet_vehicle.update({
-            where: { id: parseInt(id) },
+            where: { id: vehicleId },
             data: {
-                ...(name && { name }),
-                ...(seats && { seats: parseInt(seats) }),
-                ...(base_price_per_km && { base_price_per_km: parseFloat(base_price_per_km) }),
-                ...(category && { category }),
+                ...(name !== undefined && { name }),
+                ...(seats !== undefined && { seats: parseInt(seats, 10) }),
+                ...(base_price_per_km !== undefined && { base_price_per_km: parseFloat(base_price_per_km) }),
+                ...(base_price_airport !== undefined && { base_price_airport: parseFloat(base_price_airport) }),
+                ...(category !== undefined && { category }),
                 ...(description !== undefined && { description }),
                 ...(image_url !== undefined && { image_url }),
                 ...(is_active !== undefined && { is_active })
@@ -134,7 +152,6 @@ const updateFleetVehicle = async (req, res) => {
                 entity_type: 'FLEET',
                 entity_id: vehicle.id,
                 action: 'UPDATE',
-                old_value: JSON.stringify(existing),
                 new_value: JSON.stringify(vehicle),
                 admin_id: req.user?.id || 0,
                 reason: 'Vehicle details updated'
@@ -151,14 +168,11 @@ const updateFleetVehicle = async (req, res) => {
     } catch (error) {
         console.error('Error updating vehicle:', error);
 
-        if (isPoolTimeoutError(error)) {
-            return res.status(503).json({
-                success: false,
-                message: 'Database is busy. Please retry in a few seconds.'
-            });
+        if (isRecordNotFoundError(error)) {
+            return res.status(404).json({ success: false, message: 'Vehicle not found' });
         }
 
-        res.status(500).json({ success: false, message: 'Failed to update vehicle' });
+        return handlePrismaAvailabilityErrors(res, error, 'Failed to update vehicle');
     }
 };
 
