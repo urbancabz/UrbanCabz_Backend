@@ -11,6 +11,9 @@ const router = express.Router();
 // Simple check for current admin user
 router.get('/me', requireAuth, requireAdmin, adminController.me);
 
+// Dashboard sync payload for admin workspace
+router.get('/dashboard-sync', requireAuth, requireAdmin, adminController.getDashboardSync);
+
 // List all paid bookings (tickets) for admin
 router.get('/bookings', requireAuth, requireAdmin, adminController.listPaidBookings);
 

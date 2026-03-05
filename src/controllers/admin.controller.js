@@ -15,6 +15,72 @@ async function me(req, res) {
   return res.json({ user: req.user });
 }
 
+async function getDashboardSync(req, res) {
+  try {
+    const [
+      bookings,
+      completedBookings,
+      cancelledBookings,
+      b2bBookings,
+      b2bRequests,
+      b2bCompanies,
+      drivers,
+      fleet,
+      users,
+      recentUsers,
+    ] = await Promise.all([
+      prisma.booking.findMany({ orderBy: { created_at: 'desc' } }),
+      prisma.booking.findMany({ where: { status: 'COMPLETED' }, orderBy: { updated_at: 'desc' } }),
+      prisma.booking.findMany({ where: { status: 'CANCELLED' }, orderBy: { updated_at: 'desc' } }),
+      prisma.b2b_booking.findMany({ orderBy: { created_at: 'desc' }, include: { company: true, assignments: true } }),
+      prisma.b2b_request.findMany({ orderBy: { created_at: 'desc' }, include: { company: true } }),
+      prisma.b2b_company.findMany({ orderBy: { company_name: 'asc' } }),
+      prisma.driver.findMany({ orderBy: { name: 'asc' } }),
+      prisma.fleet_vehicle.findMany({ orderBy: { created_at: 'desc' } }),
+      prisma.user.findMany({
+        where: { role: { name: { not: 'b2b_user' } } },
+        orderBy: { created_at: 'desc' },
+        take: 200,
+        include: { role: true },
+      }),
+      prisma.user.findMany({
+        orderBy: { created_at: 'desc' },
+        take: 5,
+        select: { id: true, name: true, email: true, created_at: true },
+      }),
+    ]);
+
+    const stats = {
+      totalBookings: bookings.length,
+      completedBookings: completedBookings.length,
+      readyToAssign: bookings.filter((b) => b.taxi_assign_status === 'NOT_ASSIGNED' && b.status !== 'CANCELLED').length,
+      b2bBookings: b2bBookings.length,
+    };
+
+    return res.json({
+      success: true,
+      data: {
+        stats,
+        recentUsers,
+        bookings,
+        completedBookings,
+        cancelledBookings,
+        b2bBookings,
+        b2bRequests,
+        b2bCompanies,
+        drivers,
+        fleet,
+        users,
+      },
+    });
+  } catch (err) {
+    console.error(err);
+    const status = err.status || 500;
+    const message = err.message || 'Internal server error';
+    return res.status(status).json({ message });
+  }
+}
+
 async function listPaidBookings(req, res) {
   try {
     const bookings = await prisma.booking.findMany({
@@ -505,6 +571,7 @@ async function cancelB2BBooking(req, res) {
 
 module.exports = {
   me,
+  getDashboardSync,
   listPaidBookings,
   upsertAssignTaxi,
   getBookingTicket,
