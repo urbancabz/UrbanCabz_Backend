@@ -4,6 +4,8 @@ const cache = require('../utils/cache');
 const FLEET_CACHE_TTL = 120; // 2 minutes — fleet changes infrequently
 const FLEET_CACHE_KEY_BASE = 'fleet_vehicles';
 
+const isPoolTimeoutError = (error) => error?.code === 'P2024';
+
 // ===================== FLEET VEHICLE CRUD =====================
 
 // GET all fleet vehicles
@@ -148,6 +150,14 @@ const updateFleetVehicle = async (req, res) => {
         res.json({ success: true, data: { vehicle }, message: 'Vehicle updated successfully' });
     } catch (error) {
         console.error('Error updating vehicle:', error);
+
+        if (isPoolTimeoutError(error)) {
+            return res.status(503).json({
+                success: false,
+                message: 'Database is busy. Please retry in a few seconds.'
+            });
+        }
+
         res.status(500).json({ success: false, message: 'Failed to update vehicle' });
     }
 };

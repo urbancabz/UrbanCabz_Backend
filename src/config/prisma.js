@@ -1,12 +1,35 @@
 const { PrismaClient } = require('@prisma/client');
 
-/**
- * Single shared PrismaClient instance.
- * DATABASE_URL is set directly in Render environment variables.
- * No URL manipulation here — what you set in Render is exactly what Prisma uses.
- */
+const DEFAULT_POOL_TIMEOUT_SECONDS = 60;
+const DEFAULT_CONNECTION_LIMIT = 8;
+
+function buildPrismaUrl() {
+    const rawUrl = process.env.DATABASE_URL;
+    if (!rawUrl) return undefined;
+
+    try {
+        const url = new URL(rawUrl);
+
+        const poolTimeout = process.env.PRISMA_POOL_TIMEOUT || DEFAULT_POOL_TIMEOUT_SECONDS;
+        url.searchParams.set('pool_timeout', String(poolTimeout));
+
+        // Force a conservative default for Render to avoid exhausting DB connections.
+        // Only PRISMA_CONNECTION_LIMIT can override this default.
+        const connectionLimit = process.env.PRISMA_CONNECTION_LIMIT || DEFAULT_CONNECTION_LIMIT;
+        url.searchParams.set('connection_limit', String(connectionLimit));
+
+        return url.toString();
+    } catch {
+        // Fall back to raw URL if parsing fails for any reason.
+        return rawUrl;
+    }
+}
+
+const prismaUrl = buildPrismaUrl();
+
 const prisma = new PrismaClient({
     log: ['error'],
+    ...(prismaUrl ? { datasources: { db: { url: prismaUrl } } } : {}),
 });
 
 /**
