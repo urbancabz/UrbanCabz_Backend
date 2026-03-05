@@ -113,7 +113,8 @@ async function b2bLogin(req, res) {
     const errors = validationResult(req);
     if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
-    const { email, password } = req.body;
+    const { email: rawEmail, password } = req.body;
+    const email = rawEmail.toLowerCase();
 
     // Get user and check if they exist
     const prisma = require('../config/prisma');
@@ -176,7 +177,8 @@ async function b2bSetPassword(req, res) {
     const errors = validationResult(req);
     if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
-    const { email, password } = req.body;
+    const { email: rawEmail, password } = req.body;
+    const email = rawEmail.toLowerCase();
 
     const prisma = require('../config/prisma');
 
