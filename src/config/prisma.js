@@ -1,7 +1,7 @@
 const { PrismaClient } = require('@prisma/client');
 
 const DEFAULT_POOL_TIMEOUT_SECONDS = 60;
-const DEFAULT_CONNECTION_LIMIT = 8;
+const DEFAULT_CONNECTION_LIMIT = 20;
 
 function buildPrismaUrl() {
     const rawUrl = process.env.DATABASE_URL;
@@ -10,13 +10,21 @@ function buildPrismaUrl() {
     try {
         const url = new URL(rawUrl);
 
-        const poolTimeout = process.env.PRISMA_POOL_TIMEOUT || DEFAULT_POOL_TIMEOUT_SECONDS;
-        url.searchParams.set('pool_timeout', String(poolTimeout));
+        // Respect values already present in DATABASE_URL.
+        // Allow explicit override through env vars when needed.
+        const poolTimeout = process.env.PRISMA_POOL_TIMEOUT;
+        if (poolTimeout) {
+            url.searchParams.set('pool_timeout', String(poolTimeout));
+        } else if (!url.searchParams.get('pool_timeout')) {
+            url.searchParams.set('pool_timeout', String(DEFAULT_POOL_TIMEOUT_SECONDS));
+        }
 
-        // Force a conservative default for Render to avoid exhausting DB connections.
-        // Only PRISMA_CONNECTION_LIMIT can override this default.
-        const connectionLimit = process.env.PRISMA_CONNECTION_LIMIT || DEFAULT_CONNECTION_LIMIT;
-        url.searchParams.set('connection_limit', String(connectionLimit));
+        const connectionLimit = process.env.PRISMA_CONNECTION_LIMIT;
+        if (connectionLimit) {
+            url.searchParams.set('connection_limit', String(connectionLimit));
+        } else if (!url.searchParams.get('connection_limit')) {
+            url.searchParams.set('connection_limit', String(DEFAULT_CONNECTION_LIMIT));
+        }
 
         return url.toString();
     } catch {

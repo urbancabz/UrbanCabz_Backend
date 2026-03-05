@@ -6,6 +6,17 @@ const verificationService = require('../services/verification.service');
 const emailService = require('../services/email.service');
 const bcrypt = require('bcryptjs');
 
+function getDbAvailabilityError(err) {
+  if (err?.code === 'P1001' || err?.code === 'P2024') {
+    return {
+      status: 503,
+      message: 'Database is temporarily unavailable. Please try again in a few seconds.'
+    };
+  }
+
+  return null;
+}
+
 async function register(req, res) {
   try {
     const errors = validationResult(req);
@@ -37,6 +48,8 @@ async function login(req, res) {
     return res.json(result);
   } catch (err) {
     console.error(err);
+    const dbError = getDbAvailabilityError(err);
+    if (dbError) return res.status(dbError.status).json({ message: dbError.message });
     const status = err.status || 500;
     const message = err.message || 'Internal server error';
     return res.status(status).json({ message });
