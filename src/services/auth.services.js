@@ -34,7 +34,8 @@ function toPublicUser(user, roleName) {
   };
 }
 
-async function register({ email,password, name, phone, roleName = 'customer' }) {
+async function register({ email: rawEmail, password, name, phone, roleName = 'customer' }) {
+  const email = rawEmail.toLowerCase();
   // check existing
   const existing = await prisma.user.findUnique({ where: { email } });
   if (existing) throw { status: 409, message: 'Email already registered' };
@@ -75,9 +76,10 @@ async function register({ email,password, name, phone, roleName = 'customer' }) 
   return { user: toPublicUser(user, role.name), token };
 }
 
-async function login({ email, password }) {
-  const user = await prisma.user.findUnique({ 
-    where: { email }, 
+async function login({ email: rawEmail, password }) {
+  const email = rawEmail.toLowerCase();
+  const user = await prisma.user.findUnique({
+    where: { email },
     select: {
       id: true,
       email: true,
@@ -132,12 +134,13 @@ async function updateProfile(userId, payload) {
   if (typeof payload.name !== 'undefined') data.name = payload.name;
   if (typeof payload.phone !== 'undefined') data.phone = payload.phone;
   if (typeof payload.email !== 'undefined') {
+    const email = payload.email.toLowerCase();
     // ensure unique email
-    const existing = await prisma.user.findUnique({ where: { email: payload.email } });
+    const existing = await prisma.user.findUnique({ where: { email } });
     if (existing && existing.id !== userId) {
       throw { status: 409, message: 'Email already in use' };
     }
-    data.email = payload.email;
+    data.email = email;
   }
 
   if (Object.keys(data).length === 0) {
