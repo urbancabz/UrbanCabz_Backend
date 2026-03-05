@@ -1,0 +1,399 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model role {
+  id   Int    @id @default(autoincrement())
+  name String @unique
+  user user[]
+}
+
+model user {
+  id            Int       @id @default(autoincrement())
+  email         String    @unique
+  password_hash String?
+  name          String?
+  phone         String?
+  is_verified   Boolean   @default(false)
+  role_id       Int?
+  is_first_login Boolean  @default(true)  // Track if B2B user needs to set password
+  created_at    DateTime? @default(now()) @db.Timestamptz(6)
+  role          role?     @relation(fields: [role_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  // relations
+  bookings      booking[]
+  passwordResetOtps PasswordResetOtp[]
+  b2bUsers      b2b_user[]
+  b2bBookings   b2b_booking[]
+}
+
+// Ride booking made by a user (customer).
+model booking {
+  id              Int        @id @default(autoincrement())
+  user_id         Int
+
+  pickup_location String
+  drop_location   String
+
+  // Optional: scheduled time (for later bookings)
+  scheduled_at    DateTime?  @db.Timestamptz(6)
+
+  // Calculated values
+  distance_km     Float?
+  estimated_fare  Float?
+  total_amount    Float
+
+  // NEW: Actual trip values (entered by admin after trip)
+  actual_km       Float?
+  extra_km        Float?
+  extra_charge    Float?
+
+  // Booking lifecycle: PENDING_PAYMENT, PAID, CANCELLED, COMPLETED, IN_PROGRESS
+  status          String     @default("PENDING_PAYMENT")
+
+  // NEW: Cancellation reason (saved when admin cancels)
+  cancellation_reason String?
+
+  // Taxi assignment lifecycle for this booking: NOT_ASSIGNED, ASSIGNED, ON_TRIP, COMPLETED, CANCELLED
+  taxi_assign_status String  @default("NOT_ASSIGNED")
+
+  car_model       String?    // To store selected car model (Hycross, etc.)
+
+  created_at      DateTime?  @default(now()) @db.Timestamptz(6)
+  updated_at      DateTime?  @updatedAt @db.Timestamptz(6)
+
+  // relations
+  user            user       @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  payments        payment[]
+  assign_taxis    assign_taxi[]
+}
+
+// Payment attempts/records for a booking (e.g. Stripe/Razorpay, etc.)
+model payment {
+  id              Int        @id @default(autoincrement())
+  booking_id      Int
+  amount          Float
+  currency        String      @default("INR")
+
+  // Remaining amount to be paid (for partial payments)
+  // If amount = 100 and booking.total_amount = 260, then remainingAmount = 160
+  remaining_amount Float?    @default(0)
+
+  // status example: CREATED, SUCCESS, FAILED, REFUNDED
+  status          String
+
+  provider        String      // e.g. "stripe", "razorpay", "cash"
+  provider_txn_id String?     @unique
+
+  // remaining_amount removed (duplicate)
+
+  created_at      DateTime?   @default(now()) @db.Timestamptz(6)
+
+  // relations
+  booking         booking     @relation(fields: [booking_id], references: [id], onDelete: Cascade)
+}
+
+// Admin-side assignment of a taxi/driver to a confirmed (paid) booking.
+model assign_taxi {
+  id           Int      @id @default(autoincrement())
+  booking_id   Int
+
+  driver_name   String
+  driver_number String
+  cab_number    String
+  cab_name      String
+
+  created_at   DateTime? @default(now()) @db.Timestamptz(6)
+  updated_at   DateTime? @updatedAt @db.Timestamptz(6)
+
+  // relations
+  booking      booking  @relation(fields: [booking_id], references: [id], onDelete: Cascade)
+}
+
+model PasswordResetOtp {
+  id         Int       @id @default(autoincrement())
+  user_id    Int
+  otp_hash   String
+  expires_at DateTime  @db.Timestamptz(6)
+  verified   Boolean   @default(false)
+  attempts   Int       @default(0)
+  created_at DateTime? @default(now()) @db.Timestamptz(6)
+
+  user user @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([user_id])
+  @@index([expires_at])
+}
+
+// Internal notes for bookings (Admin communication)
+model booking_note {
+  id          Int       @id @default(autoincrement())
+  booking_id  Int
+  admin_id    Int
+  content     String
+  created_at  DateTime? @default(now()) @db.Timestamptz(6)
+
+  @@index([booking_id])
+}
+
+// Fare adjustments for extra charges (tolls, extra KM, waiting)
+model fare_adjustment {
+  id          Int       @id @default(autoincrement())
+  booking_id  Int
+  type        String    // EXTRA_KM, TOLL, WAITING, TAX, DISCOUNT, OTHER
+  amount      Float
+  description String?
+  admin_id    Int
+  created_at  DateTime? @default(now()) @db.Timestamptz(6)
+
+  @@index([booking_id])
+}
+
+// Audit trail for all admin actions
+model audit_log {
+  id          Int       @id @default(autoincrement())
+  entity_type String    // BOOKING, PAYMENT, FLEET, USER
+  entity_id   Int
+  action      String    // CREATE, UPDATE, DELETE, STATUS_CHANGE, CANCEL
+  old_value   String?   // JSON of previous state
+  new_value   String?   // JSON of new state
+  admin_id    Int
+  reason      String?   // Optional reason for the action
+  created_at  DateTime? @default(now()) @db.Timestamptz(6)
+
+  @@index([entity_type, entity_id])
+  @@index([admin_id])
+}
+
+// B2B Company information
+model b2b_company {
+  id              Int       @id @default(autoincrement())
+  company_name    String
+  company_email   String    @unique
+  company_phone   String
+  address         String?
+  city            String?
+  state           String?
+  pincode         String?
+  gst_number      String?
+  created_at      DateTime? @default(now()) @db.Timestamptz(6)
+  updated_at      DateTime? @updatedAt @db.Timestamptz(6)
+
+  // relations
+  b2bRequests     b2b_request[]
+  b2bUsers        b2b_user[]
+  b2bBookings     b2b_booking[]
+  invoices        b2b_invoice[]
+  company_fleet   b2b_company_fleet[]
+  b2bPayments     b2b_payment[]
+}
+
+// B2B Registration requests (from contact form)
+model b2b_request {
+  id              Int       @id @default(autoincrement())
+  company_id      Int?      // null until approved
+  
+  // Contact form data
+  contact_name    String
+  contact_email   String
+  contact_phone   String
+  company_name    String
+  message         String?
+  
+  // Request status: PENDING, APPROVED, REJECTED
+  status          String    @default("PENDING")
+  
+  // Admin notes and actions
+  admin_notes     String?
+  reviewed_by     Int?      // admin user_id
+  reviewed_at     DateTime? @db.Timestamptz(6)
+  
+  created_at      DateTime? @default(now()) @db.Timestamptz(6)
+  updated_at      DateTime? @updatedAt @db.Timestamptz(6)
+
+  // relations
+  company         b2b_company? @relation(fields: [company_id], references: [id], onDelete: SetNull)
+
+  @@index([status])
+  @@index([contact_email])
+}
+
+// B2B Users linked to companies
+model b2b_user {
+  id              Int       @id @default(autoincrement())
+  user_id         Int
+  company_id      Int
+  position        String?   // Job title/position in company
+  is_primary      Boolean   @default(false) // Primary contact for company
+  created_at      DateTime? @default(now()) @db.Timestamptz(6)
+
+  // relations
+  user            user        @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  company         b2b_company @relation(fields: [company_id], references: [id], onDelete: Cascade)
+
+  @@unique([user_id, company_id])
+  @@index([company_id])
+}
+
+// B2B Booking - Separate from B2C bookings
+model b2b_booking {
+  id              Int       @id @default(autoincrement())
+  company_id      Int
+  booked_by       Int       // user_id of the B2B employee who booked
+
+  pickup_location String
+  drop_location   String
+  scheduled_at    DateTime? @db.Timestamptz(6)
+
+  distance_km     Float?
+  estimated_fare  Float?
+  total_amount    Float
+
+  actual_km       Float?
+  extra_km        Float?
+  extra_charge    Float?
+
+  // Status: PENDING, CONFIRMED, IN_PROGRESS, COMPLETED, CANCELLED
+  status          String    @default("CONFIRMED")
+  cancellation_reason String?
+  taxi_assign_status String  @default("NOT_ASSIGNED")
+  car_model       String?
+
+  // Invoice linkage (for monthly billing)
+  invoice_id      Int?
+  is_invoiced     Boolean   @default(false)
+
+  created_at      DateTime? @default(now()) @db.Timestamptz(6)
+  updated_at      DateTime? @updatedAt @db.Timestamptz(6)
+
+  // Relations
+  company         b2b_company @relation(fields: [company_id], references: [id])
+  bookedByUser    user        @relation(fields: [booked_by], references: [id])
+  invoice         b2b_invoice? @relation(fields: [invoice_id], references: [id])
+  assignments     b2b_assign_taxi[]
+
+  @@index([company_id])
+  @@index([status])
+  @@index([invoice_id])
+}
+
+// B2B Taxi Assignment
+model b2b_assign_taxi {
+  id            Int       @id @default(autoincrement())
+  booking_id    Int
+  driver_name   String
+  driver_number String
+  cab_number    String
+  cab_name      String
+  created_at    DateTime? @default(now()) @db.Timestamptz(6)
+
+  booking       b2b_booking @relation(fields: [booking_id], references: [id], onDelete: Cascade)
+}
+
+// B2B Invoice for monthly billing
+model b2b_invoice {
+  id                   Int       @id @default(autoincrement())
+  company_id           Int
+  invoice_number       String    @unique
+  billing_period_start DateTime  @db.Timestamptz(6)
+  billing_period_end   DateTime  @db.Timestamptz(6)
+  total_amount         Float
+  status               String    @default("PENDING") // PENDING, PAID, OVERDUE
+  due_date             DateTime  @db.Timestamptz(6)
+  paid_at              DateTime? @db.Timestamptz(6)
+  created_at           DateTime? @default(now()) @db.Timestamptz(6)
+
+  company              b2b_company @relation(fields: [company_id], references: [id])
+  bookings             b2b_booking[]
+
+  @@index([company_id])
+  @@index([status])
+}
+
+// B2B Payments (Ledger)
+model b2b_payment {
+  id            Int      @id @default(autoincrement())
+  company_id    Int
+  amount        Float
+  payment_mode  String   // CASH, CHEQUE, UPI, BANK_TRANSFER, OTHER
+  reference_no  String?
+  notes         String?
+  paid_at       DateTime @default(now()) @db.Timestamptz(6)
+  created_by    Int?     // admin user id
+
+  company       b2b_company @relation(fields: [company_id], references: [id], onDelete: Cascade)
+
+  @@index([company_id])
+}
+
+// Fleet Management
+model fleet_vehicle {
+  id                Int      @id @default(autoincrement())
+  name              String
+  seats             Int
+  base_price_per_km Float    @default(13.0)
+  category          String   // e.g. "Sedan", "SUV", "Luxury"
+  description       String?
+  image_url         String?
+  is_active         Boolean  @default(true)
+  created_at        DateTime @default(now()) @db.Timestamptz(6)
+  updated_at        DateTime @updatedAt @db.Timestamptz(6)
+
+  // relations
+  company_fleets    b2b_company_fleet[]
+}
+
+// Company Specific Fleet Pricing
+model b2b_company_fleet {
+  id                Int      @id @default(autoincrement())
+  company_id        Int
+  fleet_vehicle_id  Int
+  
+  // Custom price for this company (overrides base_price_per_km)
+  custom_price_per_km Float
+  
+  is_active         Boolean  @default(true)
+  created_at        DateTime @default(now()) @db.Timestamptz(6)
+  updated_at        DateTime @updatedAt @db.Timestamptz(6)
+
+  // relations
+  company           b2b_company   @relation(fields: [company_id], references: [id], onDelete: Cascade)
+  vehicle           fleet_vehicle @relation(fields: [fleet_vehicle_id], references: [id], onDelete: Cascade)
+
+  @@unique([company_id, fleet_vehicle_id])
+  @@index([company_id])
+}
+
+// Driver Registry
+model driver {
+  id           Int      @id @default(autoincrement())
+  name         String
+  phone        String   @unique
+  license_no   String?
+  is_active    Boolean  @default(true)
+  created_at   DateTime @default(now()) @db.Timestamptz(6)
+  updated_at   DateTime @updatedAt @db.Timestamptz(6)
+
+  @@index([phone])
+}
+
+// Global Pricing Settings
+model pricing_settings {
+  id                     Int      @id @default(autoincrement())
+  min_km_threshold       Float    @default(100.0)
+  min_km_airport_apply   Boolean  @default(false)
+  min_km_oneway_apply    Boolean  @default(false)
+  min_km_roundtrip_apply Boolean  @default(false)
+  
+  // Service visibility toggles (admin can disable services globally)
+  service_airport_enabled   Boolean  @default(true)
+  service_oneway_enabled    Boolean  @default(true)
+  service_roundtrip_enabled Boolean  @default(true)
+  
+  updated_at             DateTime @updatedAt @db.Timestamptz(6)
+}
