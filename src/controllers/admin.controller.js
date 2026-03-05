@@ -32,7 +32,6 @@ async function getDashboardSync(req, res) {
         // Use interactive transaction so ALL queries share ONE connection.
         // Without this, 13 sequential queries hold the pool for the entire duration.
         return await prisma.$transaction(async (tx) => {
-
           const bookings = await tx.booking.findMany({
             take: 100,
             orderBy: { created_at: 'desc' },
@@ -102,8 +101,8 @@ async function getDashboardSync(req, res) {
           let pendingPaymentCount = 0;
           let assignedCount = 0;
 
-          bookings.forEach(b => {
-            const isPaid = b.status === 'PAID' || (b.status === 'PENDING_PAYMENT' && b.payments?.some(p => p.status === 'SUCCESS'));
+          bookings.forEach((b) => {
+            const isPaid = b.status === 'PAID' || (b.status === 'PENDING_PAYMENT' && b.payments?.some((p) => p.status === 'SUCCESS'));
             if (isPaid) {
               paidCount++;
               if (b.taxi_assign_status === 'ASSIGNED') assignedCount++;
@@ -137,7 +136,7 @@ async function getDashboardSync(req, res) {
             },
             recentUsers: users.slice(0, 5)
           };
-        }, { timeout: 15000 }); // 15s max for the entire transaction
+        }, { timeout: 15000 });
       },
       BOOKINGS_CACHE_TTL
     );
@@ -708,6 +707,7 @@ async function cancelB2BBooking(req, res) {
 
 module.exports = {
   me,
+  getDashboardSync,
   listPaidBookings,
   upsertAssignTaxi,
   getBookingTicket,
@@ -719,6 +719,5 @@ module.exports = {
   markB2BBillPaid,
   updateB2BBookingStatus,
   completeB2BTrip,
-  cancelB2BBooking,
-  getDashboardSync
+  cancelB2BBooking
 };
