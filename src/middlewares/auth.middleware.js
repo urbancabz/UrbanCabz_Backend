@@ -30,8 +30,8 @@ async function requireAuth(req, res, next) {
     }
 
     // If it's a database connection issue or Prisma error, it falls here instead of falsely reporting an invalid token
-    console.error('🔴 Auth middleware DB/Server error:', err.message || err);
-    return res.status(503).json({ message: 'Service temporarily unavailable. Please try again.' });
+    console.error('🔴 Auth middleware error:', err);
+    return res.status(503).json({ message: 'Service temporarily unavailable. Please try again.', debug: err.message });
   }
 }
 

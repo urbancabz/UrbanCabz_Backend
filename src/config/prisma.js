@@ -5,9 +5,9 @@ const { PrismaClient } = require('@prisma/client');
 // fewer real DB connections, so connection_limit here is the Prisma pool size
 // (app-side), not the raw Postgres connection count.
 // 10 is safe: leaves headroom for Supabase dashboard, migrations, etc.
-const DEFAULT_POOL_TIMEOUT_SECONDS = 120;  // Wait up to 2 min for a pool slot
-const DEFAULT_CONNECTION_LIMIT = 10;        // Prisma app-side pool (via pgbouncer)
-const DEFAULT_CONNECT_TIMEOUT_SECONDS = 30; // TCP connect timeout
+const DEFAULT_POOL_TIMEOUT_SECONDS = 300;  // Wait up to 5 min for a pool slot
+const DEFAULT_CONNECTION_LIMIT = 20;        // Prisma app-side pool (via pgbouncer)
+const DEFAULT_CONNECT_TIMEOUT_SECONDS = 60; // TCP connect timeout
 
 const POSTGRES_PROTOCOL_REGEX = /^postgres(?:ql)?:\/\//i;
 const DATABASE_URL_PREFIX_REGEX = /^DATABASE_URL\s*=\s*/i;
@@ -132,31 +132,42 @@ const prisma = new PrismaClient({
     }
 });
 
+// ─── ROBUST QUERY WRAPPER ───────────────────────────────────────────────────
 /**
- * Warm up the database connection at startup.
- * A single lightweight query to verify the pool is ready before traffic arrives.
- * Logs a warning and continues if it fails — the server will still start.
+ * Executes a prisma query with automatic retries for transient connection errors.
+ * Use this for critical operations like registration and booking.
+ */
+const withRetry = async (fn, maxRetries = 3) => {
+    let lastError;
+    for (let i = 0; i < maxRetries; i++) {
+        try {
+            return await fn();
+        } catch (err) {
+            lastError = err;
+            const isTransient = err.code === 'P1001' || err.code === 'P2024' || err.code === 'P1008';
+            if (!isTransient || i === maxRetries - 1) throw err;
+            
+            const delay = Math.pow(2, i) * 500; // 500ms, 1000ms, 2000ms
+            console.warn(`⚠️ Prisma transient error ${err.code}. Retrying in ${delay}ms... (Attempt ${i + 1}/${maxRetries})`);
+            await new Promise(r => setTimeout(r, delay));
+        }
+    }
+    throw lastError;
+};
+
+/**
+ * Warm up the database connection at startup with aggressive retries.
  */
 const warmupDatabase = async () => {
     console.log('⏳ Warming up database connection...');
     try {
-        await prisma.$queryRaw`SELECT 1`;
+        await withRetry(() => prisma.$queryRaw`SELECT 1`, 5);
         console.log('✅ Prisma database connection warmed up successfully.');
     } catch (err) {
-        console.warn('⚠️ Warm-up failed, continuing anyway:', err.message);
+        console.warn('❌ Warm-up failed after multiple attempts:', err.message);
     }
 };
 
-// Graceful shutdown — release DB connections cleanly
-process.on('SIGINT', async () => {
-    await prisma.$disconnect();
-    process.exit(0);
-});
-process.on('SIGTERM', async () => {
-    await prisma.$disconnect();
-    process.exit(0);
-});
-
-// Default export = prisma client (backward compatible with all existing requires)
 module.exports = prisma;
 module.exports.warmupDatabase = warmupDatabase;
+module.exports.withRetry = withRetry;
