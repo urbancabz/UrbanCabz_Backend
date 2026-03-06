@@ -19,14 +19,15 @@ app.set('trust proxy', 1);
 // ─── CORS ────────────────────────────────────────────────────────────────────
 // In production FRONTEND_URL must be set (e.g. https://urbancabz.com)
 // Locally it falls back to localhost:5174 for dev convenience
-const ALLOWED_ORIGINS = process.env.FRONTEND_URL
-  ? process.env.FRONTEND_URL.split(',').map((o) => o.trim())
-  : [
-      'http://localhost:5173',
-      'http://localhost:5174',
-      'https://urbancabz.com',
-      'https://www.urbancabz.com',
-    ];
+const ALLOWED_ORIGINS = [
+  'http://localhost:5173',
+  'http://localhost:5174',
+  'https://urbancabz.com',
+  'https://www.urbancabz.com',
+  ...(process.env.FRONTEND_URL
+    ? process.env.FRONTEND_URL.split(',').map((o) => o.trim())
+    : []),
+];
 
 app.use(cors({
   origin: (origin, callback) => {
