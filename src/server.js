@@ -61,5 +61,12 @@ async function preloadCaches() {
 // ═══════════════════════════════════════════════════════════════
 app.listen(PORT, () => {
     console.log(`Server listening on ${PORT}`);
-    warmupDatabase().then(() => preloadCaches());
+
+    // Run DB warmup and cache preload asynchronously in the background.
+    // We DO NOT await this before listening, so Render's port binding health checks pass immediately.
+    warmupDatabase()
+        .then(() => preloadCaches())
+        .catch(err => {
+            console.warn('⚠️ Background database warmup/preload failed. The server is still running, but initial queries may fail or trace timeouts:', err.message);
+        });
 });
