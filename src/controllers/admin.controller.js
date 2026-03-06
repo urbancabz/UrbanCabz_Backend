@@ -1,4 +1,5 @@
 // src/controllers/admin.controller.js
+const { withRetry } = require('../config/prisma');
 const prisma = require('../config/prisma');
 const cache = require('../utils/cache');
 
@@ -19,8 +20,9 @@ async function me(req, res) {
 }
 
 /**
- * Aggregated endpoint to fetch all admin dashboard summary data in one request,
- * preventing connection pool exhaustion from 5-10 parallel queries.
+ * Aggregated endpoint to fetch all admin dashboard summary data in one request.
+ * Refactored to use parallel queries with retries instead of an interactive transaction,
+ * preventing connection pool exhaustion and P2028 transaction timeouts.
  */
 async function getDashboardSync(req, res) {
   try {
@@ -29,114 +31,118 @@ async function getDashboardSync(req, res) {
     const dashboardData = await cache.getOrSet(
       cacheKey,
       async () => {
-        // Use interactive transaction so ALL queries share ONE connection.
-        // Without this, 13 sequential queries hold the pool for the entire duration.
-        return await prisma.$transaction(async (tx) => {
-          const bookings = await tx.booking.findMany({
+        // Parallel execution with individual retries. 
+        // This is much faster and doesn't hold a single connection hostage for the whole block.
+        const [
+          bookings,
+          pendingPayments,
+          completedBookings,
+          cancelledBookings,
+          users,
+          drivers,
+          fleet,
+          b2bCompanies,
+          b2bRequests,
+          b2bBookings,
+          totalBookingsCount,
+          activeDriversCount,
+          b2bBookingsCount
+        ] = await Promise.all([
+          withRetry(() => prisma.booking.findMany({
             take: 100,
             orderBy: { created_at: 'desc' },
             include: { user: true, payments: true, assign_taxis: true }
-          });
-
-          const pendingPayments = await tx.booking.findMany({
+          })),
+          withRetry(() => prisma.booking.findMany({
             where: { status: 'PENDING_PAYMENT', payments: { some: { status: { in: ['CREATED', 'PENDING'] } } } },
             take: 50,
             orderBy: { created_at: 'desc' },
             include: { user: true, payments: true, assign_taxis: true }
-          });
-
-          const completedBookings = await tx.booking.findMany({
+          })),
+          withRetry(() => prisma.booking.findMany({
             where: { status: 'COMPLETED' },
             take: 50,
             orderBy: { updated_at: 'desc' },
             include: { user: true, payments: true, assign_taxis: true }
-          });
-
-          const cancelledBookings = await tx.booking.findMany({
+          })),
+          withRetry(() => prisma.booking.findMany({
             where: { status: 'CANCELLED' },
             take: 50,
             orderBy: { updated_at: 'desc' },
             include: { user: true, payments: true, assign_taxis: true }
-          });
-
-          const users = await tx.user.findMany({
+          })),
+          withRetry(() => prisma.user.findMany({
             where: { role: { name: { not: 'b2b_user' } } },
             take: 100,
             orderBy: { created_at: 'desc' },
             include: { role: true, _count: { select: { bookings: true } } }
-          });
-
-          const drivers = await tx.driver.findMany({
+          })),
+          withRetry(() => prisma.driver.findMany({
             take: 100,
             orderBy: { name: 'asc' }
-          });
-
-          const fleet = await tx.fleet_vehicle.findMany({
+          })),
+          withRetry(() => prisma.fleet_vehicle.findMany({
             where: { is_active: true }
-          });
-
-          const b2bCompanies = await tx.b2b_company.findMany({
+          })),
+          withRetry(() => prisma.b2b_company.findMany({
             take: 50,
             orderBy: { company_name: 'asc' },
             include: { _count: { select: { company_fleet: true } } }
-          });
-
-          const b2bRequests = await tx.b2b_request.findMany({
+          })),
+          withRetry(() => prisma.b2b_request.findMany({
             take: 50,
             orderBy: { created_at: 'desc' },
             include: { company: { select: { id: true, company_name: true, company_email: true } } }
-          });
-
-          const b2bBookings = await tx.b2b_booking.findMany({
+          })),
+          withRetry(() => prisma.b2b_booking.findMany({
             take: 50,
             orderBy: { created_at: 'desc' },
             include: { company: true, bookedByUser: { select: { id: true, name: true, email: true, phone: true } }, assignments: true }
-          });
+          })),
+          withRetry(() => prisma.booking.count()),
+          withRetry(() => prisma.driver.count({ where: { is_active: true } })),
+          withRetry(() => prisma.b2b_booking.count())
+        ]);
 
-          const totalBookingsCount = await tx.booking.count();
-          const activeDriversCount = await tx.driver.count({ where: { is_active: true } });
-          const b2bBookingsCount = await tx.b2b_booking.count();
+        let paidCount = 0;
+        let pendingPaymentCount = 0;
+        let assignedCount = 0;
 
-          let paidCount = 0;
-          let pendingPaymentCount = 0;
-          let assignedCount = 0;
+        bookings.forEach((b) => {
+          const isPaid = b.status === 'PAID' || (b.status === 'PENDING_PAYMENT' && b.payments?.some((p) => p.status === 'SUCCESS'));
+          if (isPaid) {
+            paidCount++;
+            if (b.taxi_assign_status === 'ASSIGNED') assignedCount++;
+          } else {
+            pendingPaymentCount++;
+          }
+        });
 
-          bookings.forEach((b) => {
-            const isPaid = b.status === 'PAID' || (b.status === 'PENDING_PAYMENT' && b.payments?.some((p) => p.status === 'SUCCESS'));
-            if (isPaid) {
-              paidCount++;
-              if (b.taxi_assign_status === 'ASSIGNED') assignedCount++;
-            } else {
-              pendingPaymentCount++;
-            }
-          });
+        const readyToAssign = Math.max(0, paidCount - assignedCount);
 
-          const readyToAssign = Math.max(0, paidCount - assignedCount);
-
-          return {
-            bookings,
-            pendingPayments,
-            completedBookings,
-            cancelledBookings,
-            users,
-            drivers,
-            fleet,
-            b2bCompanies,
-            b2bRequests,
-            b2bBookings,
-            stats: {
-              totalBookings: totalBookingsCount,
-              completedBookings: completedBookings.length,
-              pendingBookings: pendingPayments.length,
-              actualPendingPayment: pendingPaymentCount,
-              paidCount,
-              readyToAssign,
-              b2bBookings: b2bBookingsCount,
-              activeDrivers: activeDriversCount
-            },
-            recentUsers: users.slice(0, 5)
-          };
-        }, { timeout: 15000 });
+        return {
+          bookings,
+          pendingPayments,
+          completedBookings,
+          cancelledBookings,
+          users,
+          drivers,
+          fleet,
+          b2bCompanies,
+          b2bRequests,
+          b2bBookings,
+          stats: {
+            totalBookings: totalBookingsCount,
+            completedBookings: completedBookings.length,
+            pendingBookings: pendingPayments.length,
+            actualPendingPayment: pendingPaymentCount,
+            paidCount,
+            readyToAssign,
+            b2bBookings: b2bBookingsCount,
+            activeDrivers: activeDriversCount
+          },
+          recentUsers: users.slice(0, 5)
+        };
       },
       BOOKINGS_CACHE_TTL
     );
@@ -144,7 +150,7 @@ async function getDashboardSync(req, res) {
     return res.json({ success: true, data: dashboardData });
   } catch (err) {
     console.error('Dashboard Sync Error:', err);
-    return res.status(500).json({ success: false, message: 'Failed to sync dashboard data' });
+    return res.status(500).json({ success: false, message: 'Failed to sync dashboard data', debug: err.message });
   }
 }
 
@@ -156,7 +162,7 @@ async function listPaidBookings(req, res) {
     const bookings = await cache.getOrSet(
       cacheKey,
       async () => {
-        return await prisma.booking.findMany({
+        return await withRetry(() => prisma.booking.findMany({
           orderBy: { created_at: 'desc' },
           include: {
             user: true,
@@ -164,7 +170,7 @@ async function listPaidBookings(req, res) {
             assign_taxis: true,
           },
           take: limit
-        });
+        }));
       },
       BOOKINGS_CACHE_TTL
     );
@@ -180,7 +186,6 @@ async function listPaidBookings(req, res) {
 
 /**
  * Create or update taxi assignment for a booking.
- * Body: { driverName, driverNumber, cabNumber, cabName }
  */
 async function upsertAssignTaxi(req, res) {
   try {
@@ -195,46 +200,31 @@ async function upsertAssignTaxi(req, res) {
       driverNumber,
       cabNumber,
       cabName,
-      markAssigned = false,
     } = req.body;
 
-    // Ensure booking exists
-    // Fetch only needed fields — faster, uses less connection time
-    const booking = await prisma.booking.findUnique({
+    const booking = await withRetry(() => prisma.booking.findUnique({
       where: { id: bookingId },
       select: {
         id: true,
         pickup_location: true,
         drop_location: true,
         total_amount: true,
-        payments: {
-          select: {
-            amount: true,
-            status: true
-          }
-        },
-        user: {
-          select: {
-            name: true,
-            phone: true,
-            email: true
-          }
-        }
+        payments: { select: { amount: true, status: true } },
+        user: { select: { name: true, phone: true, email: true } }
       }
-    });
+    }));
 
     if (!booking) {
       return res.status(404).json({ message: 'Booking not found' });
     }
 
-    // Upsert assign_taxi record
-    const existing = await prisma.assign_taxi.findFirst({
+    const existing = await withRetry(() => prisma.assign_taxi.findFirst({
       where: { booking_id: bookingId },
-    });
+    }));
 
     let assignment;
     if (existing) {
-      assignment = await prisma.assign_taxi.update({
+      assignment = await withRetry(() => prisma.assign_taxi.update({
         where: { id: existing.id },
         data: {
           driver_name: driverName,
@@ -242,9 +232,9 @@ async function upsertAssignTaxi(req, res) {
           cab_number: cabNumber,
           cab_name: cabName,
         },
-      });
+      }));
     } else {
-      assignment = await prisma.assign_taxi.create({
+      assignment = await withRetry(() => prisma.assign_taxi.create({
         data: {
           booking_id: bookingId,
           driver_name: driverName,
@@ -252,10 +242,9 @@ async function upsertAssignTaxi(req, res) {
           cab_number: cabNumber,
           cab_name: cabName,
         },
-      });
+      }));
     }
 
-    // Automatically send WhatsApp messages and only mark as ASSIGNED if they succeed
     try {
       await sendTaxiAssignmentWhatsApp({
         toPhone: booking.user?.phone,
@@ -269,29 +258,25 @@ async function upsertAssignTaxi(req, res) {
         assignment,
       });
 
-      // Send Email to Customer
       if (booking.user && booking.user.email) {
-        // Fire-and-forget — never block response for SMTP
         emailService.sendDriverAssignedEmail(booking, assignment, booking.user)
           .catch(err => console.error('Failed to send driver assignment email:', err));
       }
 
-      await prisma.booking.update({
+      await withRetry(() => prisma.booking.update({
         where: { id: bookingId },
         data: {
           taxi_assign_status: 'ASSIGNED',
-          status: 'IN_PROGRESS', // Auto-start trip when WhatsApp sent successfully
+          status: 'IN_PROGRESS', 
         },
-      });
+      }));
     } catch (notifyErr) {
       console.error('Failed to send WhatsApp assignment messages:', notifyErr);
       return res.status(500).json({
-        message:
-          'Taxi assignment saved, but WhatsApp messages could not be sent. Please verify Twilio configuration.',
+        message: 'Taxi assignment saved, but WhatsApp messages could not be sent.'
       });
     }
 
-    // Invalidate booking cache so next poll gets fresh data
     cache.invalidate('admin:bookings');
     cache.invalidate('admin:bookings_100');
     cache.invalidate('admin:dashboard_sync');
@@ -314,22 +299,21 @@ async function upsertAssignTaxi(req, res) {
 async function getBookingTicket(req, res) {
   try {
     const bookingId = parseInt(req.params.bookingId, 10);
-    const booking = await prisma.booking.findUnique({
+    const booking = await withRetry(() => prisma.booking.findUnique({
       where: { id: bookingId },
       include: {
         user: true,
         payments: true,
       },
-    });
+    }));
 
     if (!booking) {
       return res.status(404).json({ message: 'Booking not found' });
     }
 
-    // Manually attach assign_taxis to avoid Prisma include errors
-    const assignments = await prisma.assign_taxi.findMany({
+    const assignments = await withRetry(() => prisma.assign_taxi.findMany({
       where: { booking_id: bookingId },
-    });
+    }));
 
     return res.json({ booking: { ...booking, assign_taxis: assignments } });
   } catch (err) {
@@ -341,7 +325,7 @@ async function getBookingTicket(req, res) {
 }
 
 /**
- * Get completed bookings (for History table view)
+ * Get completed bookings
  */
 async function getCompletedBookings(req, res) {
   try {
@@ -350,7 +334,7 @@ async function getCompletedBookings(req, res) {
     const cached = cache.get(cacheKey);
     if (cached) return res.json(cached);
 
-    const bookings = await prisma.booking.findMany({
+    const bookings = await withRetry(() => prisma.booking.findMany({
       where: { status: 'COMPLETED' },
       orderBy: { updated_at: 'desc' },
       select: {
@@ -366,7 +350,7 @@ async function getCompletedBookings(req, res) {
         assign_taxis: { select: { cab_name: true, cab_number: true, driver_name: true } },
       },
       take: limit
-    });
+    }));
 
     const result = { bookings };
     cache.set(cacheKey, result, 60);
@@ -378,7 +362,7 @@ async function getCompletedBookings(req, res) {
 }
 
 /**
- * Get cancelled bookings (for Cancelled History table view)
+ * Get cancelled bookings
  */
 async function getCancelledBookings(req, res) {
   try {
@@ -387,7 +371,7 @@ async function getCancelledBookings(req, res) {
     const cached = cache.get(cacheKey);
     if (cached) return res.json(cached);
 
-    const bookings = await prisma.booking.findMany({
+    const bookings = await withRetry(() => prisma.booking.findMany({
       where: { status: 'CANCELLED' },
       orderBy: { updated_at: 'desc' },
       select: {
@@ -403,7 +387,7 @@ async function getCancelledBookings(req, res) {
         assign_taxis: { select: { cab_name: true, cab_number: true, driver_name: true } },
       },
       take: limit
-    });
+    }));
 
     const result = { bookings };
     cache.set(cacheKey, result, 60);
@@ -415,7 +399,7 @@ async function getCancelledBookings(req, res) {
 }
 
 /**
- * Get pending payment bookings (Razorpay initiated but not completed)
+ * Get pending payment bookings
  */
 async function getPendingPayments(req, res) {
   try {
@@ -424,14 +408,10 @@ async function getPendingPayments(req, res) {
     const cached = cache.get(cacheKey);
     if (cached) return res.json(cached);
 
-    const bookings = await prisma.booking.findMany({
+    const bookings = await withRetry(() => prisma.booking.findMany({
       where: {
         status: 'PENDING_PAYMENT',
-        payments: {
-          some: {
-            status: { in: ['CREATED', 'PENDING'] } // Razorpay order created but not paid
-          }
-        }
+        payments: { some: { status: { in: ['CREATED', 'PENDING'] } } }
       },
       orderBy: { created_at: 'desc' },
       select: {
@@ -447,7 +427,7 @@ async function getPendingPayments(req, res) {
         assign_taxis: { select: { cab_name: true, cab_number: true, driver_name: true } },
       },
       take: limit
-    });
+    }));
 
     const result = { bookings };
     cache.set(cacheKey, result, 60);
@@ -469,17 +449,15 @@ async function listB2BBookings(req, res) {
     const bookings = await cache.getOrSet(
       cacheKey,
       async () => {
-        return await prisma.b2b_booking.findMany({
+        return await withRetry(() => prisma.b2b_booking.findMany({
           orderBy: { created_at: 'desc' },
           include: {
             company: true,
-            bookedByUser: {
-              select: { id: true, name: true, email: true, phone: true }
-            },
+            bookedByUser: { select: { id: true, name: true, email: true, phone: true } },
             assignments: true,
           },
           take: limit
-        });
+        }));
       },
       BOOKINGS_CACHE_TTL
     );
@@ -502,30 +480,24 @@ async function upsertB2BAssignTaxi(req, res) {
     }
 
     const bookingId = parseInt(req.params.bookingId, 10);
-    const {
-      driverName,
-      driverNumber,
-      cabNumber,
-      cabName,
-    } = req.body;
+    const { driverName, driverNumber, cabNumber, cabName } = req.body;
 
-    const booking = await prisma.b2b_booking.findUnique({
+    const booking = await withRetry(() => prisma.b2b_booking.findUnique({
       where: { id: bookingId },
       include: { company: true }
-    });
+    }));
 
     if (!booking) {
       return res.status(404).json({ message: 'B2B Booking not found' });
     }
 
-    // Upsert b2b_assign_taxi
-    const existing = await prisma.b2b_assign_taxi.findFirst({
+    const existing = await withRetry(() => prisma.b2b_assign_taxi.findFirst({
       where: { booking_id: bookingId },
-    });
+    }));
 
     let assignment;
     if (existing) {
-      assignment = await prisma.b2b_assign_taxi.update({
+      assignment = await withRetry(() => prisma.b2b_assign_taxi.update({
         where: { id: existing.id },
         data: {
           driver_name: driverName,
@@ -533,9 +505,9 @@ async function upsertB2BAssignTaxi(req, res) {
           cab_number: cabNumber,
           cab_name: cabName,
         },
-      });
+      }));
     } else {
-      assignment = await prisma.b2b_assign_taxi.create({
+      assignment = await withRetry(() => prisma.b2b_assign_taxi.create({
         data: {
           booking_id: bookingId,
           driver_name: driverName,
@@ -543,18 +515,14 @@ async function upsertB2BAssignTaxi(req, res) {
           cab_number: cabNumber,
           cab_name: cabName,
         },
-      });
+      }));
     }
 
-    // Update booking status
-    await prisma.b2b_booking.update({
+    await withRetry(() => prisma.b2b_booking.update({
       where: { id: bookingId },
-      data: {
-        taxi_assign_status: 'ASSIGNED'
-      },
-    });
+      data: { taxi_assign_status: 'ASSIGNED' },
+    }));
 
-    // Invalidate B2B booking cache so next poll gets fresh data
     cache.invalidate('admin:b2b_bookings');
     cache.invalidate('admin:b2b_bookings_50');
     cache.invalidate('admin:dashboard_sync');
@@ -570,30 +538,22 @@ async function upsertB2BAssignTaxi(req, res) {
   }
 }
 
-/**
- * Mark a B2B booking as paid (offline payment)
- */
 // Mark B2B bill as paid (offline)
 async function markB2BBillPaid(req, res) {
   try {
     const bookingId = parseInt(req.params.bookingId, 10);
-    // mode and remarks were unused/invalid in schema, ignoring them for now or logging them if needed
-    // const { mode, remarks } = req.body; 
-
-    const booking = await prisma.b2b_booking.findUnique({
+    const booking = await withRetry(() => prisma.b2b_booking.findUnique({
       where: { id: bookingId }
-    });
+    }));
 
     if (!booking) {
       return res.status(404).json({ message: 'B2B Booking not found' });
     }
 
-    const updated = await prisma.b2b_booking.update({
+    const updated = await withRetry(() => prisma.b2b_booking.update({
       where: { id: bookingId },
-      data: {
-        status: 'PAID'
-      }
-    });
+      data: { status: 'PAID' }
+    }));
 
     cache.invalidate('admin:b2b_bookings');
     cache.invalidate('admin:b2b_bookings_50');
@@ -611,29 +571,28 @@ async function markB2BBillPaid(req, res) {
 }
 
 /**
- * Update B2B booking status (manual trip lifecycle)
+ * Update B2B booking status
  */
 async function updateB2BBookingStatus(req, res) {
   try {
     const { id } = req.params;
-    const { status, reason } = req.body;
-    const adminId = req.user?.id || 0;
+    const { status } = req.body;
 
-    const booking = await prisma.b2b_booking.findUnique({ where: { id: parseInt(id) } });
+    const booking = await withRetry(() => prisma.b2b_booking.findUnique({ where: { id: parseInt(id) } }));
     if (!booking) {
       return res.status(404).json({ success: false, message: 'B2B Booking not found' });
     }
 
-    const updated = await prisma.b2b_booking.update({
+    const updated = await withRetry(() => prisma.b2b_booking.update({
       where: { id: parseInt(id) },
       data: { status }
-    });
+    }));
 
     cache.invalidate('admin:b2b_bookings');
     cache.invalidate('admin:b2b_bookings_50');
     cache.invalidate('admin:dashboard_sync');
 
-    return res.json({ success: true, data: { booking: updated }, message: `B2B Booking status updated to ${status}` });
+    return res.json({ success: true, data: { booking: updated }, message: `B2B Booking status updated` });
   } catch (error) {
     console.error('Error updating B2B booking status:', error);
     return res.status(500).json({ success: false, message: 'Failed to update B2B booking status' });
@@ -646,21 +605,21 @@ async function updateB2BBookingStatus(req, res) {
 async function completeB2BTrip(req, res) {
   try {
     const { id } = req.params;
-    const { actual_km, toll_charges, notes } = req.body;
+    const { actual_km, toll_charges } = req.body;
 
-    const booking = await prisma.b2b_booking.findUnique({ where: { id: parseInt(id) } });
+    const booking = await withRetry(() => prisma.b2b_booking.findUnique({ where: { id: parseInt(id) } }));
     if (!booking) {
       return res.status(404).json({ success: false, message: 'B2B Booking not found' });
     }
 
-    const updated = await prisma.b2b_booking.update({
+    const updated = await withRetry(() => prisma.b2b_booking.update({
       where: { id: parseInt(id) },
       data: {
         status: 'COMPLETED',
         actual_km: parseFloat(actual_km) || booking.distance_km,
         extra_charge: parseFloat(toll_charges) || 0
       }
-    });
+    }));
 
     cache.invalidate('admin:b2b_bookings');
     cache.invalidate('admin:b2b_bookings_50');
@@ -681,18 +640,18 @@ async function cancelB2BBooking(req, res) {
     const { id } = req.params;
     const { reason } = req.body;
 
-    const booking = await prisma.b2b_booking.findUnique({ where: { id: parseInt(id) } });
+    const booking = await withRetry(() => prisma.b2b_booking.findUnique({ where: { id: parseInt(id) } }));
     if (!booking) {
       return res.status(404).json({ success: false, message: 'B2B Booking not found' });
     }
 
-    const updated = await prisma.b2b_booking.update({
+    const updated = await withRetry(() => prisma.b2b_booking.update({
       where: { id: parseInt(id) },
       data: {
         status: 'CANCELLED',
         cancellation_reason: reason
       }
-    });
+    }));
 
     cache.invalidate('admin:b2b_bookings');
     cache.invalidate('admin:b2b_bookings_50');

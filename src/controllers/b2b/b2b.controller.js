@@ -1,3 +1,4 @@
+const { withRetry } = require('../../config/prisma');
 const prisma = require('../../config/prisma');
 const cache = require('../../utils/cache');
 const bcrypt = require('bcryptjs');
@@ -26,57 +27,41 @@ const registerB2BRequest = async (req, res) => {
     try {
         const { name, company, email, phone, message } = req.body;
 
-        // Validate required fields
         if (!name || !company || !email || !phone) {
-            return res.status(400).json({
-                success: false,
-                message: 'All fields are required'
-            });
+            return res.status(400).json({ success: false, message: 'All fields are required' });
         }
 
-        // Check if request already exists
-        const existingRequest = await prisma.b2b_request.findFirst({
+        const existingRequest = await withRetry(() => prisma.b2b_request.findFirst({
             where: { contact_email: email }
-        });
+        }));
 
         if (existingRequest) {
-            return res.status(400).json({
-                success: false,
-                message: 'A request with this email already exists'
-            });
+            return res.status(400).json({ success: false, message: 'A request with this email already exists' });
         }
 
-        // Create new B2B request
-        const b2bRequest = await prisma.b2b_request.create({
+        const b2bRequest = await withRetry(() => prisma.b2b_request.create({
             data: {
                 contact_name: name,
                 contact_email: email,
-                contact_phone: normalizePhone(phone), // Normalize: +91XXXXXXXXXX → XXXXXXXXXX
+                contact_phone: normalizePhone(phone),
                 company_name: company,
                 message: message || null,
                 status: 'PENDING'
             }
-        });
+        }));
 
-        // Invalidate B2B requests cache
         cache.invalidate('all_b2b_requests_PENDING');
         cache.invalidate('all_b2b_requests_undefined');
 
         res.status(201).json({
             success: true,
-            message: 'Registration request submitted successfully! Our team will contact you shortly.',
-            data: {
-                id: b2bRequest.id,
-                company_name: b2bRequest.company_name
-            }
+            message: 'Registration request submitted successfully!',
+            data: { id: b2bRequest.id, company_name: b2bRequest.company_name }
         });
 
     } catch (error) {
         console.error('B2B Registration Error:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Failed to submit registration request'
-        });
+        res.status(500).json({ success: false, message: 'Failed to submit registration request' });
     }
 };
 
@@ -94,37 +79,22 @@ const getAllB2BRequests = async (req, res) => {
         const requests = await cache.getOrSet(
             cacheKey,
             async () => {
-                return await prisma.b2b_request.findMany({
+                return await withRetry(() => prisma.b2b_request.findMany({
                     where,
                     include: {
-                        company: {
-                            select: {
-                                id: true,
-                                company_name: true,
-                                company_email: true
-                            }
-                        }
+                        company: { select: { id: true, company_name: true, company_email: true } }
                     },
-                    orderBy: {
-                        created_at: 'desc'
-                    },
+                    orderBy: { created_at: 'desc' },
                     take: 50
-                });
+                }));
             },
             B2B_CACHE_TTL
         );
 
-        res.json({
-            success: true,
-            data: requests
-        });
-
+        res.json({ success: true, data: requests });
     } catch (error) {
         console.error('Get B2B Requests Error:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Failed to fetch B2B requests'
-        });
+        res.status(500).json({ success: false, message: 'Failed to fetch B2B requests' });
     }
 };
 
@@ -136,32 +106,19 @@ const getAllB2BRequests = async (req, res) => {
 const getB2BRequestById = async (req, res) => {
     try {
         const { id } = req.params;
-
-        const request = await prisma.b2b_request.findUnique({
+        const request = await withRetry(() => prisma.b2b_request.findUnique({
             where: { id: parseInt(id) },
-            include: {
-                company: true
-            }
-        });
+            include: { company: true }
+        }));
 
         if (!request) {
-            return res.status(404).json({
-                success: false,
-                message: 'Request not found'
-            });
+            return res.status(404).json({ success: false, message: 'Request not found' });
         }
 
-        res.json({
-            success: true,
-            data: request
-        });
-
+        res.json({ success: true, data: request });
     } catch (error) {
         console.error('Get B2B Request Error:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Failed to fetch request details'
-        });
+        res.status(500).json({ success: false, message: 'Failed to fetch request details' });
     }
 };
 
@@ -173,34 +130,18 @@ const getB2BRequestById = async (req, res) => {
 const approveB2BRequest = async (req, res) => {
     try {
         const { id } = req.params;
-        const { admin_notes, address, city, state, pincode } = req.body;
-        const adminId = req.user?.id; // From auth middleware
+        const { address, city, state, pincode } = req.body;
+        const adminId = req.user?.id;
 
-        const request = await prisma.b2b_request.findUnique({
+        const request = await withRetry(() => prisma.b2b_request.findUnique({
             where: { id: parseInt(id) }
-        });
+        }));
 
-        if (!request) {
-            return res.status(404).json({
-                success: false,
-                message: 'Request not found'
-            });
-        }
+        if (!request) return res.status(404).json({ success: false, message: 'Request not found' });
+        if (request.status === 'APPROVED') return res.status(400).json({ success: false, message: 'Request already approved' });
 
-        if (request.status === 'APPROVED') {
-            return res.status(400).json({
-                success: false,
-                message: 'Request already approved'
-            });
-        }
-
-        // Use transaction to ensure data consistency
         const result = await prisma.$transaction(async (tx) => {
-            // 1. Create or get company
-            let company = await tx.b2b_company.findUnique({
-                where: { company_email: request.contact_email }
-            });
-
+            let company = await tx.b2b_company.findUnique({ where: { company_email: request.contact_email } });
             if (!company) {
                 company = await tx.b2b_company.create({
                     data: {
@@ -215,30 +156,17 @@ const approveB2BRequest = async (req, res) => {
                 });
             }
 
-            // 2. Get or create B2B role
-            let b2bRole = await tx.role.findFirst({
-                where: { name: 'b2b_user' }
-            });
-
+            let b2bRole = await tx.role.findFirst({ where: { name: 'b2b_user' } });
             if (!b2bRole) {
-                b2bRole = await tx.role.create({
-                    data: { name: 'b2b_user' }
-                });
+                b2bRole = await tx.role.create({ data: { name: 'b2b_user' } });
             }
 
-            // 3. Create or get user account
-            let user = await tx.user.findUnique({
-                where: { email: request.contact_email }
-            });
-
+            let user = await tx.user.findUnique({ where: { email: request.contact_email } });
             if (user) {
-                // Update existing user to have B2B role
                 user = await tx.user.update({
                     where: { id: user.id },
                     data: {
                         role_id: b2bRole.id,
-                        // If they already have a password, they don't need "first login" flow
-                        // For B2B flow refinement, we set a default password if they don't have one
                         password_hash: user.password_hash || await bcrypt.hash('UrbanCabz123', 10),
                         is_first_login: user.password_hash ? false : true
                     }
@@ -251,27 +179,20 @@ const approveB2BRequest = async (req, res) => {
                         phone: request.contact_phone,
                         role_id: b2bRole.id,
                         is_first_login: true,
-                        password_hash: await bcrypt.hash('UrbanCabz123', 10) // Set default password
+                        password_hash: await bcrypt.hash('UrbanCabz123', 10)
                     }
                 });
             }
 
-            // 4. Link user to company
             await tx.b2b_user.create({
-                data: {
-                    user_id: user.id,
-                    company_id: company.id,
-                    is_primary: true
-                }
+                data: { user_id: user.id, company_id: company.id, is_primary: true }
             });
 
-            // 5. Update request status
             const updatedRequest = await tx.b2b_request.update({
                 where: { id: parseInt(id) },
                 data: {
                     status: 'APPROVED',
                     company_id: company.id,
-                    admin_notes: admin_notes || null,
                     reviewed_by: adminId || null,
                     reviewed_at: new Date()
                 }
@@ -280,7 +201,6 @@ const approveB2BRequest = async (req, res) => {
             return { company, user, request: updatedRequest };
         });
 
-        // Invalidate B2B caches
         cache.invalidate('all_b2b_requests_PENDING');
         cache.invalidate('all_b2b_requests_undefined');
         cache.invalidate('all_b2b_companies');
@@ -288,22 +208,12 @@ const approveB2BRequest = async (req, res) => {
         res.json({
             success: true,
             message: 'B2B request approved successfully',
-            data: {
-                company: result.company,
-                user: {
-                    id: result.user.id,
-                    email: result.user.email,
-                    name: result.user.name
-                }
-            }
+            data: { company: result.company, user: { id: result.user.id, email: result.user.email, name: result.user.name } }
         });
 
     } catch (error) {
         console.error('Approve B2B Request Error:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Failed to approve request'
-        });
+        res.status(500).json({ success: false, message: 'Failed to approve request' });
     }
 };
 
@@ -315,53 +225,32 @@ const approveB2BRequest = async (req, res) => {
 const rejectB2BRequest = async (req, res) => {
     try {
         const { id } = req.params;
-        const { admin_notes } = req.body;
         const adminId = req.user?.id;
 
-        const request = await prisma.b2b_request.findUnique({
-            where: { id: parseInt(id) }
-        });
+        const request = await withRetry(() => prisma.b2b_request.findUnique({ where: { id: parseInt(id) } }));
+        if (!request) return res.status(404).json({ success: false, message: 'Request not found' });
 
-        if (!request) {
-            return res.status(404).json({
-                success: false,
-                message: 'Request not found'
-            });
-        }
-
-        const updatedRequest = await prisma.b2b_request.update({
+        const updatedRequest = await withRetry(() => prisma.b2b_request.update({
             where: { id: parseInt(id) },
             data: {
                 status: 'REJECTED',
-                admin_notes: admin_notes || null,
                 reviewed_by: adminId || null,
                 reviewed_at: new Date()
             }
-        });
+        }));
 
-        // Invalidate B2B requests cache
         cache.invalidate(`all_b2b_requests_${request.status}`);
         cache.invalidate('all_b2b_requests_undefined');
 
-        res.json({
-            success: true,
-            message: 'B2B request rejected',
-            data: updatedRequest
-        });
-
+        res.json({ success: true, message: 'B2B request rejected', data: updatedRequest });
     } catch (error) {
         console.error('Reject B2B Request Error:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Failed to reject request'
-        });
+        res.status(500).json({ success: false, message: 'Failed to reject request' });
     }
 };
 
 /**
  * @route   GET /api/b2b/company/:id
- * @desc    Get company details
- * @access  Private/B2B User
  */
 const getCompanyById = async (req, res) => {
     try {
@@ -371,52 +260,30 @@ const getCompanyById = async (req, res) => {
         const company = await cache.getOrSet(
             cacheKey,
             async () => {
-                return await prisma.b2b_company.findUnique({
+                return await withRetry(() => prisma.b2b_company.findUnique({
                     where: { id: parseInt(id) },
                     include: {
                         b2bUsers: {
                             include: {
-                                user: {
-                                    select: {
-                                        id: true,
-                                        email: true,
-                                        name: true,
-                                        phone: true
-                                    }
-                                }
+                                user: { select: { id: true, email: true, name: true, phone: true } }
                             }
                         }
                     }
-                });
+                }));
             },
             B2B_CACHE_TTL
         );
 
-        if (!company) {
-            return res.status(404).json({
-                success: false,
-                message: 'Company not found'
-            });
-        }
-
-        res.json({
-            success: true,
-            data: company
-        });
-
+        if (!company) return res.status(404).json({ success: false, message: 'Company not found' });
+        res.json({ success: true, data: company });
     } catch (error) {
         console.error('Get Company Error:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Failed to fetch company details'
-        });
+        res.status(500).json({ success: false, message: 'Failed to fetch company details' });
     }
 };
 
 /**
  * @route   GET /api/b2b/company/my
- * @desc    Get current user's company profile
- * @access  Private/B2B User
  */
 const getMyCompanyProfile = async (req, res) => {
     try {
@@ -427,38 +294,21 @@ const getMyCompanyProfile = async (req, res) => {
         const company = await cache.getOrSet(
             cacheKey,
             async () => {
-                return await prisma.b2b_company.findUnique({
-                    where: { id: companyId }
-                });
+                return await withRetry(() => prisma.b2b_company.findUnique({ where: { id: companyId } }));
             },
             B2B_CACHE_TTL
         );
 
-        if (!company) {
-            return res.status(404).json({
-                success: false,
-                message: 'Company profile not found'
-            });
-        }
-
-        res.json({
-            success: true,
-            data: company
-        });
-
+        if (!company) return res.status(404).json({ success: false, message: 'Company profile not found' });
+        res.json({ success: true, data: company });
     } catch (error) {
         console.error('Get My Company Error:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Failed to fetch company profile'
-        });
+        res.status(500).json({ success: false, message: 'Failed to fetch company profile' });
     }
 };
 
 /**
  * @route   POST /api/b2b/bookings
- * @desc    Create a ride booking on company credit (using b2b_booking table)
- * @access  Private/B2B User
  */
 const createCreditBooking = async (req, res) => {
     try {
@@ -466,18 +316,11 @@ const createCreditBooking = async (req, res) => {
         const bookingData = req.body;
         const companyId = req.user.companyId;
 
-        if (!companyId) {
-            return res.status(403).json({
-                success: false,
-                message: 'Company not found'
-            });
-        }
+        if (!companyId) return res.status(403).json({ success: false, message: 'Company not found' });
 
-        // Accept both camelCase (carModel) and snake_case (car_model) from frontend
         const carModel = bookingData.carModel || bookingData.car_model || null;
 
-        // Create B2B booking in the dedicated table
-        const booking = await prisma.b2b_booking.create({
+        const booking = await withRetry(() => prisma.b2b_booking.create({
             data: {
                 company_id: companyId,
                 booked_by: userId,
@@ -491,20 +334,12 @@ const createCreditBooking = async (req, res) => {
                 status: 'CONFIRMED',
                 taxi_assign_status: 'NOT_ASSIGNED'
             }
-        });
+        }));
 
-        res.status(201).json({
-            success: true,
-            message: 'Booking confirmed on company credit',
-            data: booking
-        });
-
+        res.status(201).json({ success: true, message: 'Booking confirmed on company credit', data: booking });
     } catch (error) {
         console.error('Create Credit Booking Error:', error);
-        res.status(500).json({
-            success: false,
-            message: error.message || 'Failed to create booking'
-        });
+        res.status(500).json({ success: false, message: error.message || 'Failed to create booking' });
     }
 };
 
@@ -513,66 +348,32 @@ const getCompanyPayments = async (req, res) => {
         const companyId = req.user.companyId;
         if (!companyId) return res.status(403).json({ success: false, message: 'Company not found' });
 
-        const cacheKey = `company_payments_${companyId}`;
-
-        // Fetch all Ledger Payments for this company (Cached)
-        const payments = await cache.getOrSet(
-            cacheKey,
-            async () => {
-                return await prisma.b2b_payment.findMany({
+        const [payments, bookings] = await Promise.all([
+            cache.getOrSet(`company_payments_${companyId}`, 
+                () => withRetry(() => prisma.b2b_payment.findMany({
                     where: { company_id: companyId },
                     orderBy: { paid_at: 'desc' },
                     take: 50
-                });
-            },
-            B2B_CACHE_TTL
-        );
-
-        // Fetch all B2B bookings to calculate summary stats (Cached)
-        const bookings = await cache.getOrSet(
-            `b2b:company_bookings_billing:${companyId}`,
-            async () => {
-                return await prisma.b2b_booking.findMany({
+                })), B2B_CACHE_TTL),
+            cache.getOrSet(`b2b:company_bookings_billing:${companyId}`,
+                () => withRetry(() => prisma.b2b_booking.findMany({
                     where: { company_id: companyId },
                     take: 100
-                });
-            },
-            B2B_CACHE_TTL
-        );
+                })), B2B_CACHE_TTL)
+        ]);
 
-        // Calculate Billing Summary
         let totalBilled = 0;
         let totalPaid = 0;
-
-        bookings.forEach(b => {
-            totalBilled += parseFloat(b.total_amount) || 0;
-        });
-
-        payments.forEach(p => {
-            totalPaid += parseFloat(p.amount) || 0;
-        });
-
-        const billingSummary = {
-            totalBilled,
-            totalPaid,
-            outstanding: totalBilled - totalPaid,
-            totalBookings: bookings.length
-        };
+        bookings.forEach(b => { totalBilled += parseFloat(b.total_amount) || 0; });
+        payments.forEach(p => { totalPaid += parseFloat(p.amount) || 0; });
 
         res.json({
             success: true,
-            data: {
-                payments,
-                billingSummary
-            }
+            data: { payments, billingSummary: { totalBilled, totalPaid, outstanding: totalBilled - totalPaid, totalBookings: bookings.length } }
         });
-
     } catch (error) {
         console.error('Get My Company Payments Error:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Failed to fetch payment history'
-        });
+        res.status(500).json({ success: false, message: 'Failed to fetch payment history' });
     }
 };
 
@@ -581,94 +382,56 @@ const getCompanyBookings = async (req, res) => {
         const companyId = req.user.companyId;
         if (!companyId) return res.status(403).json({ success: false, message: 'Company not found' });
 
-        const cacheKey = `company_bookings_${companyId}`;
+        const bookings = await cache.getOrSet(`company_bookings_${companyId}`,
+            () => withRetry(() => prisma.b2b_booking.findMany({
+                where: { company_id: companyId },
+                orderBy: { created_at: 'desc' },
+                include: { bookedByUser: { select: { id: true, name: true, email: true } }, assignments: true },
+                take: 50
+            })), B2B_CACHE_TTL);
 
-        // Fetch all B2B bookings for this company (cached)
-        const bookings = await cache.getOrSet(
-            cacheKey,
-            async () => {
-                return await prisma.b2b_booking.findMany({
-                    where: { company_id: companyId },
-                    orderBy: { created_at: 'desc' },
-                    include: {
-                        bookedByUser: {
-                            select: { id: true, name: true, email: true }
-                        },
-                        assignments: true
-                    },
-                    take: 50
-                });
-            },
-            B2B_CACHE_TTL
-        );
-
-        res.json({
-            success: true,
-            data: bookings
-        });
-
+        res.json({ success: true, data: bookings });
     } catch (error) {
         console.error('Get Company Bookings Error:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Failed to fetch company bookings'
-        });
+        res.status(500).json({ success: false, message: 'Failed to fetch company bookings' });
     }
 };
 
 /**
  * @route   GET /api/b2b/dashboard-sync
- * @desc    Aggregate Company Profile, Bookings, Payment Stats, and Fleet for the Dashboard mount payload
- * @access  Private/B2B User
+ * Aggregated B2B Dashboard payload.
+ * Refactored to use parallel queries with individual retries.
  */
 const getDashboardSync = async (req, res) => {
     try {
         const companyId = req.user.companyId;
         if (!companyId) return res.status(403).json({ success: false, message: 'Company not found' });
 
-        // 1. Get user's company (cached to avoid uncached DB hit on every dashboard load)
-        const company = await cache.getOrSet(
-            `b2b:company:${companyId}`,
-            async () => prisma.b2b_company.findUnique({ where: { id: companyId } }),
-            B2B_CACHE_TTL
-        );
+        const [company, bookingsRes, paymentsRes, fleetRes] = await Promise.all([
+            cache.getOrSet(`b2b:company:${companyId}`,
+                () => withRetry(() => prisma.b2b_company.findUnique({ where: { id: companyId } })), B2B_CACHE_TTL),
+            cache.getOrSet(`company_bookings_${companyId}`,
+                () => withRetry(() => prisma.b2b_booking.findMany({
+                    where: { company_id: companyId },
+                    orderBy: { created_at: 'desc' },
+                    include: { bookedByUser: { select: { id: true, name: true, email: true } }, assignments: true },
+                    take: 50
+                })), B2B_CACHE_TTL),
+            cache.getOrSet(`company_payments_${companyId}`,
+                () => withRetry(() => prisma.b2b_payment.findMany({
+                    where: { company_id: companyId },
+                    orderBy: { paid_at: 'desc' },
+                    take: 50
+                })), B2B_CACHE_TTL),
+            cache.getOrSet(`b2b:my_fleet:${companyId}`,
+                () => withRetry(() => prisma.b2b_company_fleet.findMany({
+                    where: { company_id: companyId, is_active: true },
+                    include: { vehicle: true }
+                })), B2B_CACHE_TTL)
+        ]);
+
         if (!company) return res.status(403).json({ success: false, message: 'Company details not found' });
 
-        // 2. Fetch dependencies purely sequentially to strictly bound DB connection concurrency to 1 per request
-        // Bookings (Cached)
-        const bookingsRes = await cache.getOrSet(
-            `company_bookings_${companyId}`,
-            async () => await prisma.b2b_booking.findMany({
-                where: { company_id: companyId },
-                orderBy: { created_at: 'desc' },
-                include: { bookedByUser: { select: { id: true, name: true, email: true } }, assignments: true },
-                take: 50
-            }),
-            B2B_CACHE_TTL
-        );
-
-        // Payments (Cached)
-        const paymentsRes = await cache.getOrSet(
-            `company_payments_${companyId}`,
-            async () => await prisma.b2b_payment.findMany({
-                where: { company_id: companyId },
-                orderBy: { paid_at: 'desc' },
-                take: 50
-            }),
-            B2B_CACHE_TTL
-        );
-
-        // Fleet (Cached — same TTL as bookings/payments)
-        const fleetRes = await cache.getOrSet(
-            `b2b:my_fleet:${companyId}`,
-            () => prisma.b2b_company_fleet.findMany({
-                where: { company_id: companyId, is_active: true },
-                include: { vehicle: true }
-            }),
-            B2B_CACHE_TTL
-        );
-
-        // 3. Calculate lightweight billing summary locally without extra DB hits
         let totalBilled = 0;
         let totalPaid = 0;
         bookingsRes.forEach(b => { totalBilled += parseFloat(b.total_amount) || 0; });
@@ -677,53 +440,32 @@ const getDashboardSync = async (req, res) => {
         res.json({
             success: true,
             data: {
-                company: company,
+                company,
                 bookings: bookingsRes,
                 payments: paymentsRes,
-                billingSummary: {
-                    totalBilled,
-                    totalPaid,
-                    outstanding: totalBilled - totalPaid,
-                    totalBookings: bookingsRes.length
-                },
-                fleet: fleetRes.map(item => ({
-                    ...item.vehicle,
-                    base_price_per_km: item.custom_price_per_km
-                }))
+                billingSummary: { totalBilled, totalPaid, outstanding: totalBilled - totalPaid, totalBookings: bookingsRes.length },
+                fleet: fleetRes.map(item => ({ ...item.vehicle, base_price_per_km: item.custom_price_per_km }))
             }
         });
 
     } catch (error) {
         console.error('B2B Dashboard Sync Error:', error);
-        res.status(500).json({ success: false, message: 'Failed to synthesize dashboard data' });
+        res.status(500).json({ success: false, message: 'Failed to synthesize dashboard data', debug: error.message });
     }
 };
-
-// ===================== COMPANY FLEET MANAGEMENT =====================
 
 /**
  * @route   GET /api/b2b/companies
  * @desc    Get all verified B2B companies (Admin only)
- * @access  Private/Admin
  */
 const getCompanies = async (req, res) => {
     try {
-        const cacheKey = 'all_b2b_companies';
-        const companies = await cache.getOrSet(
-            cacheKey,
-            async () => {
-                return await prisma.b2b_company.findMany({
-                    orderBy: { company_name: 'asc' },
-                    include: {
-                        _count: {
-                            select: { company_fleet: true }
-                        }
-                    },
-                    take: 50
-                });
-            },
-            B2B_CACHE_TTL
-        );
+        const companies = await cache.getOrSet('all_b2b_companies',
+            () => withRetry(() => prisma.b2b_company.findMany({
+                orderBy: { company_name: 'asc' },
+                include: { _count: { select: { company_fleet: true } } },
+                take: 50
+            })), B2B_CACHE_TTL);
 
         res.json({ success: true, data: companies });
     } catch (error) {
@@ -734,26 +476,15 @@ const getCompanies = async (req, res) => {
 
 /**
  * @route   GET /api/b2b/companies/:id/fleet
- * @desc    Get fleet assigned to a company (Admin only)
- * @access  Private/Admin
  */
 const getCompanyFleet = async (req, res) => {
     try {
         const { id } = req.params;
-        const cacheKey = `b2b:company_fleet:${id}`;
-
-        const fleet = await cache.getOrSet(
-            cacheKey,
-            async () => {
-                return await prisma.b2b_company_fleet.findMany({
-                    where: { company_id: parseInt(id) },
-                    include: {
-                        vehicle: true
-                    }
-                });
-            },
-            B2B_CACHE_TTL
-        );
+        const fleet = await cache.getOrSet(`b2b:company_fleet:${id}`,
+            () => withRetry(() => prisma.b2b_company_fleet.findMany({
+                where: { company_id: parseInt(id) },
+                include: { vehicle: true }
+            })), B2B_CACHE_TTL);
 
         res.json({ success: true, data: fleet });
     } catch (error) {
@@ -764,8 +495,6 @@ const getCompanyFleet = async (req, res) => {
 
 /**
  * @route   POST /api/b2b/companies/:id/fleet
- * @desc    Assign vehicle or update price for company
- * @access  Private/Admin
  */
 const manageCompanyFleet = async (req, res) => {
     try {
@@ -776,13 +505,9 @@ const manageCompanyFleet = async (req, res) => {
             return res.status(400).json({ success: false, message: 'Vehicle ID and price are required' });
         }
 
-        // Upsert: Create if not exists, update if exists
-        const assignment = await prisma.b2b_company_fleet.upsert({
+        const assignment = await withRetry(() => prisma.b2b_company_fleet.upsert({
             where: {
-                company_id_fleet_vehicle_id: {
-                    company_id: parseInt(id),
-                    fleet_vehicle_id: parseInt(fleet_vehicle_id)
-                }
+                company_id_fleet_vehicle_id: { company_id: parseInt(id), fleet_vehicle_id: parseInt(fleet_vehicle_id) }
             },
             update: {
                 custom_price_per_km: parseFloat(custom_price_per_km),
@@ -794,9 +519,8 @@ const manageCompanyFleet = async (req, res) => {
                 custom_price_per_km: parseFloat(custom_price_per_km),
                 is_active: true
             }
-        });
+        }));
 
-        // Invalidate company fleet caches
         cache.invalidate('all_b2b_companies');
         cache.invalidate(`b2b:company_fleet:${id}`);
         cache.invalidate(`b2b:my_fleet:${id}`);
@@ -810,26 +534,16 @@ const manageCompanyFleet = async (req, res) => {
 
 /**
  * @route   DELETE /api/b2b/fleet-assignment/:id
- * @desc    Remove a vehicle assignment from a company
- * @access  Private/Admin
  */
 const removeCompanyFleet = async (req, res) => {
     try {
         const { id } = req.params;
+        const assignment = await withRetry(() => prisma.b2b_company_fleet.findUnique({ where: { id: parseInt(id) } }));
 
-        const assignment = await prisma.b2b_company_fleet.findUnique({
-            where: { id: parseInt(id) }
-        });
+        if (!assignment) return res.status(404).json({ success: false, message: 'Assignment not found' });
 
-        if (!assignment) {
-            return res.status(404).json({ success: false, message: 'Assignment not found' });
-        }
+        await withRetry(() => prisma.b2b_company_fleet.delete({ where: { id: parseInt(id) } }));
 
-        await prisma.b2b_company_fleet.delete({
-            where: { id: parseInt(id) }
-        });
-
-        // Invalidate fleet caches
         cache.invalidate(`b2b:company_fleet:${assignment.company_id}`);
         cache.invalidate(`b2b:my_fleet:${assignment.company_id}`);
         cache.invalidate('all_b2b_companies');
@@ -843,172 +557,93 @@ const removeCompanyFleet = async (req, res) => {
 
 /**
  * @route   GET /api/b2b/my-fleet
- * @desc    Get fleet assigned to current user's company
- * @access  Private/B2B User
  */
 const getMyFleet = async (req, res) => {
     try {
         const companyId = req.user.companyId;
         if (!companyId) return res.status(403).json({ success: false, message: 'Company not found' });
 
-        const cacheKey = `b2b:my_fleet:${companyId}`;
-
-        const vehicles = await cache.getOrSet(
-            cacheKey,
+        const vehicles = await cache.getOrSet(`b2b:my_fleet:${companyId}`,
             async () => {
-                const assignedFleet = await prisma.b2b_company_fleet.findMany({
-                    where: {
-                        company_id: companyId,
-                        is_active: true
-                    },
-                    include: {
-                        vehicle: true
-                    }
-                });
-
-                // Transform to match public fleet structure but with custom price
-                return assignedFleet.map(item => ({
-                    ...item.vehicle,
-                    base_price_per_km: item.custom_price_per_km
+                const assignedFleet = await withRetry(() => prisma.b2b_company_fleet.findMany({
+                    where: { company_id: companyId, is_active: true },
+                    include: { vehicle: true }
                 }));
-            },
-            B2B_CACHE_TTL
-        );
+                return assignedFleet.map(item => ({ ...item.vehicle, base_price_per_km: item.custom_price_per_km }));
+            }, B2B_CACHE_TTL);
 
         res.json({ success: true, data: { vehicles } });
-
     } catch (error) {
         console.error('Get My Fleet Error:', error);
         res.status(500).json({ success: false, message: 'Failed to fetch fleet' });
     }
 };
 
-/**
- * @route   GET /api/b2b/companies/:id/bookings
-         * @desc    Get all bookings and billing stats for a specific company (Admin only)
-         * @access  Private/Admin
-         */
 const getCompanyBookingsForAdmin = async (req, res) => {
     try {
         const { id } = req.params;
         const companyId = parseInt(id);
-        const cacheKey = `admin_company_bookings_${companyId}`;
 
-        // 1. Fetch Bookings (Cached)
-        const bookings = await cache.getOrSet(
-            cacheKey,
-            async () => {
-                return await prisma.b2b_booking.findMany({
+        const [bookings, payments] = await Promise.all([
+            cache.getOrSet(`admin_company_bookings_${companyId}`,
+                () => withRetry(() => prisma.b2b_booking.findMany({
                     where: { company_id: companyId },
                     orderBy: { created_at: 'desc' },
-                    include: {
-                        bookedByUser: {
-                            select: { id: true, name: true, email: true }
-                        }
-                    },
+                    include: { bookedByUser: { select: { id: true, name: true, email: true } } },
                     take: 50
-                });
-            },
-            B2B_CACHE_TTL
-        );
-
-        // Payments (Cached)
-        const payments = await cache.getOrSet(
-            `b2b:company_payments_admin:${companyId}`,
-            async () => {
-                return await prisma.b2b_payment.findMany({
+                })), B2B_CACHE_TTL),
+            cache.getOrSet(`b2b:company_payments_admin:${companyId}`,
+                () => withRetry(() => prisma.b2b_payment.findMany({
                     where: { company_id: companyId },
                     orderBy: { paid_at: 'desc' },
                     take: 50
-                });
-            },
-            B2B_CACHE_TTL
-        );
+                })), B2B_CACHE_TTL)
+        ]);
 
-        // Calculate Billing Summary
         let totalBilled = 0;
         let totalPaid = 0;
+        bookings.forEach(b => { totalBilled += parseFloat(b.total_amount) || 0; });
+        payments.forEach(p => { totalPaid += parseFloat(p.amount) || 0; });
 
-        bookings.forEach(b => {
-            totalBilled += parseFloat(b.total_amount) || 0;
-        });
-
-        payments.forEach(p => {
-            totalPaid += parseFloat(p.amount) || 0;
-        });
-
-        const billingSummary = {
-            totalBilled,
-            totalPaid,
-            outstanding: totalBilled - totalPaid,
-            totalBookings: bookings.length
-        };
-
-        // Monthly Breakdown
+        const billingSummary = { totalBilled, totalPaid, outstanding: totalBilled - totalPaid, totalBookings: bookings.length };
         const monthlyBreakdown = {};
 
-        // Track billed
         bookings.forEach(b => {
             const date = new Date(b.created_at);
             const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-
-            if (!monthlyBreakdown[key]) {
-                monthlyBreakdown[key] = { count: 0, billed: 0, paid: 0 };
-            }
-
+            if (!monthlyBreakdown[key]) monthlyBreakdown[key] = { count: 0, billed: 0, paid: 0 };
             monthlyBreakdown[key].count++;
             monthlyBreakdown[key].billed += parseFloat(b.total_amount) || 0;
         });
 
-        // Track paid (ledger)
         payments.forEach(p => {
             const date = new Date(p.paid_at);
             const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-
-            if (!monthlyBreakdown[key]) {
-                monthlyBreakdown[key] = { count: 0, billed: 0, paid: 0 };
-            }
-
+            if (!monthlyBreakdown[key]) monthlyBreakdown[key] = { count: 0, billed: 0, paid: 0 };
             monthlyBreakdown[key].paid += parseFloat(p.amount) || 0;
         });
 
-        res.json({
-            success: true,
-            data: {
-                bookings,
-                payments,
-                billingSummary,
-                monthlyBreakdown
-            }
-        });
-
+        res.json({ success: true, data: { bookings, payments, billingSummary, monthlyBreakdown } });
     } catch (error) {
         console.error('Get Company Bookings (Admin) Error:', error);
         res.status(500).json({ success: false, message: 'Failed to fetch company bookings' });
     }
 };
 
-/**
- * @route   POST /api/b2b/payments
- * @desc    Record a ledger payment for a company (Admin only)
- * @access  Private/Admin
- */
 const recordCompanyPayment = async (req, res) => {
     try {
         const { company_id, amount, payment_mode, reference_no, notes } = req.body;
         const adminId = req.user?.id;
-
         const VALID_MODES = ['CASH', 'CHEQUE', 'UPI', 'BANK_TRANSFER', 'OTHER'];
 
         if (!company_id) return res.status(400).json({ success: false, message: 'Company ID is required' });
         if (!amount || isNaN(amount) || parseFloat(amount) <= 0) return res.status(400).json({ success: false, message: 'Amount must be a positive number' });
         if (!payment_mode || !VALID_MODES.includes(payment_mode)) return res.status(400).json({ success: false, message: `Payment mode must be one of: ${VALID_MODES.join(', ')}` });
 
-        // Verify company exists
-        const company = await prisma.b2b_company.findUnique({ where: { id: parseInt(company_id) } });
+        const company = await withRetry(() => prisma.b2b_company.findUnique({ where: { id: parseInt(company_id) } }));
         if (!company) return res.status(404).json({ success: false, message: 'Company not found' });
 
-        const payment = await prisma.b2b_payment.create({
+        const payment = await withRetry(() => prisma.b2b_payment.create({
             data: {
                 company_id: parseInt(company_id),
                 amount: parseFloat(amount),
@@ -1017,9 +652,8 @@ const recordCompanyPayment = async (req, res) => {
                 notes: notes || null,
                 created_by: adminId || null
             }
-        });
+        }));
 
-        // Invalidate payments caches
         cache.invalidate(`company_payments_${company_id}`);
         cache.invalidate(`admin_company_bookings_${company_id}`);
         cache.invalidate(`b2b:company_payments_admin:${company_id}`);
@@ -1032,11 +666,6 @@ const recordCompanyPayment = async (req, res) => {
     }
 };
 
-/**
- * @route   POST /api/b2b/companies
- * @desc    Admin manually creates a new company + user
- * @access  Private/Admin
- */
 const createCompany = async (req, res) => {
     try {
         const { company_name, company_email, company_phone, address, city, state, pincode, gst_number } = req.body;
@@ -1045,73 +674,36 @@ const createCompany = async (req, res) => {
             return res.status(400).json({ success: false, message: 'Company name, email, and phone are required' });
         }
 
-        // Check if company email already exists
-        const existingCompany = await prisma.b2b_company.findUnique({ where: { company_email } });
-        if (existingCompany) {
-            return res.status(400).json({ success: false, message: 'Company with this email already exists' });
-        }
+        const existingCompany = await withRetry(() => prisma.b2b_company.findUnique({ where: { company_email } }));
+        if (existingCompany) return res.status(400).json({ success: false, message: 'Company with this email already exists' });
 
         const result = await prisma.$transaction(async (tx) => {
-            // 1. Create company
             const company = await tx.b2b_company.create({
-                data: {
-                    company_name,
-                    company_email,
-                    company_phone,
-                    address: address || null,
-                    city: city || null,
-                    state: state || null,
-                    pincode: pincode || null,
-                    gst_number: gst_number || null
-                }
+                data: { company_name, company_email, company_phone, address, city, state, pincode, gst_number }
             });
 
-            // 2. Ensure B2B role exists
             let b2bRole = await tx.role.findFirst({ where: { name: 'b2b_user' } });
-            if (!b2bRole) {
-                b2bRole = await tx.role.create({ data: { name: 'b2b_user' } });
-            }
+            if (!b2bRole) b2bRole = await tx.role.create({ data: { name: 'b2b_user' } });
 
-            // 3. Create or Update User
             let user = await tx.user.findUnique({ where: { email: company_email } });
             if (!user) {
-                const hashedPassword = await bcrypt.hash('UrbanCabz123', 10);
                 user = await tx.user.create({
                     data: {
                         email: company_email,
-                        name: company_name, // Default user name to company name
+                        name: company_name,
                         phone: company_phone,
                         role_id: b2bRole.id,
                         is_first_login: true,
-                        password_hash: hashedPassword
+                        password_hash: await bcrypt.hash('UrbanCabz123', 10)
                     }
                 });
-            } else {
-                // If user exists, ensure they have B2B role if not admin
-                // (Strictly speaking we might want to be careful here, but for now we essentially 'upgrade' them or ensuring mapping)
-                if (user.role_id !== b2bRole.id) {
-                    // logic to handle existing users? 
-                    // For now, let's just proceed to link them.
-                }
             }
 
-            // 4. Link User to Company
-            await tx.b2b_user.create({
-                data: {
-                    user_id: user.id,
-                    company_id: company.id,
-                    is_primary: true
-                }
-            });
-
+            await tx.b2b_user.create({ data: { user_id: user.id, company_id: company.id, is_primary: true } });
             return company;
         });
 
-        // Invalidate companies list
         cache.invalidate('all_b2b_companies');
-        cache.invalidate(`b2b:company:${result.id}`);
-        cache.invalidate(`b2b:my_company:${result.id}`);
-
         res.status(201).json({ success: true, message: 'Company created manually', data: result });
     } catch (error) {
         console.error('Create Company Error:', error);
@@ -1119,44 +711,21 @@ const createCompany = async (req, res) => {
     }
 };
 
-/**
- * @route   PUT /api/b2b/companies/:id
- * @desc    Admin updates company details
- * @access  Private/Admin
- */
 const updateCompany = async (req, res) => {
     try {
         const { id } = req.params;
-        const { company_name, company_email, company_phone, address, city, state, pincode, gst_number } = req.body;
+        const payload = req.body;
 
-        const company = await prisma.b2b_company.findUnique({ where: { id: parseInt(id) } });
+        const company = await withRetry(() => prisma.b2b_company.findUnique({ where: { id: parseInt(id) } }));
         if (!company) return res.status(404).json({ success: false, message: 'Company not found' });
 
-        // If email is changing, check uniqueness
-        if (company_email && company_email !== company.company_email) {
-            const existing = await prisma.b2b_company.findUnique({ where: { company_email } });
-            if (existing) return res.status(400).json({ success: false, message: 'Email already in use by another company' });
-        }
-
-        const updated = await prisma.b2b_company.update({
+        const updated = await withRetry(() => prisma.b2b_company.update({
             where: { id: parseInt(id) },
-            data: {
-                company_name,
-                company_email,
-                company_phone,
-                address,
-                city,
-                state,
-                pincode,
-                gst_number
-            }
-        });
+            data: payload
+        }));
 
-        // Invalidate company caches
         cache.invalidate('all_b2b_companies');
         cache.invalidate(`b2b:company:${id}`);
-        cache.invalidate(`b2b:my_company:${parseInt(id)}`);
-
         res.json({ success: true, message: 'Company details updated', data: updated });
     } catch (error) {
         console.error('Update Company Error:', error);
