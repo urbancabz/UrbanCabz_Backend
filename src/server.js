@@ -1,5 +1,5 @@
 const path = require('path');
-require('dotenv').config({ path: path.resolve(__dirname, '../.env') });
+require('dotenv').config({ path: path.resolve(__dirname, '../.env'), override: true });
 const app = require('./app');
 const prisma = require('./config/prisma');
 const { warmupDatabase } = require('./config/prisma');
