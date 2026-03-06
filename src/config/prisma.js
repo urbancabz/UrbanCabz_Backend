@@ -109,8 +109,10 @@ function buildPrismaUrl() {
         // Supabase pooler benefits from explicit pgbouncer mode for Prisma,
         // BUT only when using the transaction-mode port (6543).
         // If we are forced to port 5432 (session mode), pgbouncer=true can cause errors.
-        if (url.port === '6543' && !url.searchParams.get('pgbouncer')) {
-            url.searchParams.set('pgbouncer', 'true');
+        if (url.port === '6543') {
+            if (!url.searchParams.get('pgbouncer')) url.searchParams.set('pgbouncer', 'true');
+            if (!url.searchParams.get('connect_timeout')) url.searchParams.set('connect_timeout', '15');
+            if (!url.searchParams.get('pool_timeout')) url.searchParams.set('pool_timeout', '15');
         }
 
         return url.toString();
@@ -158,14 +160,19 @@ const withRetry = async (fn, maxRetries = 3) => {
 /**
  * Warm up the database connection at startup with aggressive retries.
  */
-const warmupDatabase = async () => {
+const warmupDatabase = async (maxAttempts = 5, delayMs = 3000) => {
     console.log('⏳ Warming up database connection...');
-    try {
-        await withRetry(() => prisma.pricing_settings.findFirst(), 5);
-        console.log('✅ Prisma database connection warmed up successfully.');
-    } catch (err) {
-        console.warn('❌ Warm-up failed after multiple attempts:', err.message);
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        try {
+            await prisma.pricing_settings.findFirst();
+            console.log('✅ Prisma database connection warmed up successfully.');
+            return;
+        } catch (err) {
+            console.warn(`⚠️ Attempt ${attempt}/${maxAttempts} failed, retrying in ${delayMs}ms...`);
+            if (attempt < maxAttempts) await new Promise(res => setTimeout(res, delayMs));
+        }
     }
+    console.warn('⚠️ Warm-up failed — continuing anyway');
 };
 
 module.exports = prisma;
