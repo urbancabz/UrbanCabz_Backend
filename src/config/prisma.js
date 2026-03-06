@@ -106,13 +106,11 @@ function buildPrismaUrl() {
             10
         );
 
-        // Supabase pooler benefits from explicit pgbouncer mode for Prisma,
-        // BUT only when using the transaction-mode port (6543).
-        // If we are forced to port 5432 (session mode), pgbouncer=true can cause errors.
+        // Render blocks outbound port 6543. Force session pooler (5432) always.
         if (url.port === '6543') {
-            if (!url.searchParams.get('pgbouncer')) url.searchParams.set('pgbouncer', 'true');
-            if (!url.searchParams.get('connect_timeout')) url.searchParams.set('connect_timeout', '15');
-            if (!url.searchParams.get('pool_timeout')) url.searchParams.set('pool_timeout', '15');
+            url.port = '5432';
+            url.searchParams.delete('pgbouncer');
+            console.warn('⚠️ DATABASE_URL had port 6543 — forced to 5432 (Render blocks 6543).');
         }
 
         return url.toString();
