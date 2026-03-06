@@ -59,18 +59,7 @@ async function preloadCaches() {
 // every single request queues against the pool simultaneously
 // and they ALL timeout at 20 seconds, crashing the server.
 // ═══════════════════════════════════════════════════════════════
-async function startServer() {
-    try {
-        await warmupDatabase();
-
-        // Preload caches AFTER warmup completes
-        await preloadCaches();
-    } catch (err) {
-        console.error('❌ Could not connect to database during startup. Starting server anyway...');
-        console.error(err.message);
-    }
-
-    app.listen(PORT, () => console.log(`Server listening on ${PORT}`));
-}
-
-startServer();
+app.listen(PORT, () => {
+    console.log(`Server listening on ${PORT}`);
+    warmupDatabase().then(() => preloadCaches());
+});
