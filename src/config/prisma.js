@@ -1,13 +1,11 @@
 const { PrismaClient } = require('@prisma/client');
 
-// Supabase free tier: max 10 direct DB connections shared across all services.
-// Using the pgbouncer pooler (port 6543) multiplexes many app connections into
-// fewer real DB connections, so connection_limit here is the Prisma pool size
-// (app-side), not the raw Postgres connection count.
-// 10 is safe: leaves headroom for Supabase dashboard, migrations, etc.
-const DEFAULT_POOL_TIMEOUT_SECONDS = 120;  // 2 min
-const DEFAULT_CONNECTION_LIMIT = 10;        // Safer for Supabase free tier
-const DEFAULT_CONNECT_TIMEOUT_SECONDS = 30; // TCP connect timeout
+// Using Supabase direct connection (db.xxx.supabase.co:5432) which supports IPv6.
+// Render free tier is IPv6-only; the pooler (pooler.supabase.com) is IPv4-only and unreachable.
+// Direct connection limit on Supabase free tier = 20. Keep connection_limit very low.
+const DEFAULT_POOL_TIMEOUT_SECONDS = 120;
+const DEFAULT_CONNECTION_LIMIT = 3;
+const DEFAULT_CONNECT_TIMEOUT_SECONDS = 30;
 
 const POSTGRES_PROTOCOL_REGEX = /^postgres(?:ql)?:\/\//i;
 const DATABASE_URL_PREFIX_REGEX = /^DATABASE_URL\s*=\s*/i;
@@ -106,15 +104,8 @@ function buildPrismaUrl() {
             10
         );
 
-        // Supabase transaction pooler uses port 6543; session pooler uses 5432.
-        // Both ports work on Render, but session pooler (5432) is preferred for
-        // Prisma because it supports prepared statements. Force 5432 if 6543 is set.
-        if (url.port === '6543') {
-            url.port = '5432';
-            // Keep pgbouncer=true — Prisma still needs it for the pooler at 5432.
-            url.searchParams.set('pgbouncer', 'true');
-            console.warn('⚠️ DATABASE_URL had port 6543 — switched to session pooler port 5432.');
-        }
+        // Direct connection: remove pgbouncer param if present (not valid for direct connections).
+        url.searchParams.delete('pgbouncer');
 
         return url.toString();
     } catch {
