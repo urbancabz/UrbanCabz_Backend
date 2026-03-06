@@ -106,8 +106,10 @@ function buildPrismaUrl() {
             10
         );
 
-        // Supabase pooler benefits from explicit pgbouncer mode for Prisma.
-        if (!url.searchParams.get('pgbouncer')) {
+        // Supabase pooler benefits from explicit pgbouncer mode for Prisma,
+        // BUT only when using the transaction-mode port (6543).
+        // If we are forced to port 5432 (session mode), pgbouncer=true can cause errors.
+        if (url.port === '6543' && !url.searchParams.get('pgbouncer')) {
             url.searchParams.set('pgbouncer', 'true');
         }
 
@@ -123,7 +125,11 @@ const prismaUrl = buildPrismaUrl();
 
 const prisma = new PrismaClient({
     log: ['error'],
-    ...(prismaUrl ? { datasources: { db: { url: prismaUrl } } } : {}),
+    datasources: {
+        db: {
+            url: prismaUrl,
+        }
+    }
 });
 
 /**
