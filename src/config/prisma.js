@@ -82,6 +82,26 @@ function buildPrismaUrl() {
     try {
         const url = new URL(normalizedUrl);
 
+        // ─── ROBUST PORT UPGRADE ─────────────────────────────────────────────
+        // Supabase poolers (.pooler.supabase.com) support both 5432 and 6543.
+        // Prisma Client + high concurrency on Render MUST use 6543 (Transaction mode).
+        // 5432 is Session mode and frequently fails with P1001 when sessions exhaust.
+        if (url.hostname.includes('.pooler.supabase.com') && url.port === '5432') {
+            console.warn('⚠️ DETECTED SUPABASE SESSION MODE (Port 5432). Upgrading to Transaction Mode (Port 6543) for stability.');
+            url.port = '6543';
+        }
+
+        // ─── ESSENTIAL PARAMETERS ───────────────────────────────────────────
+        // Transaction poolers require pgbouncer=true to work correctly with Prisma
+        if (url.port === '6543' && !url.searchParams.get('pgbouncer')) {
+            url.searchParams.set('pgbouncer', 'true');
+        }
+
+        // Supabase/Render require SSL
+        if (!url.searchParams.get('sslmode')) {
+            url.searchParams.set('sslmode', 'require');
+        }
+
         applyNumericParam(
             url,
             'pool_timeout',
@@ -103,7 +123,7 @@ function buildPrismaUrl() {
             'connect_timeout',
             process.env.PRISMA_CONNECT_TIMEOUT,
             DEFAULT_CONNECT_TIMEOUT_SECONDS,
-            10
+            30 // Increased for better stability on cold starts
         );
 
 
@@ -139,9 +159,14 @@ const withRetry = async (fn, maxRetries = 3) => {
         } catch (err) {
             lastError = err;
             const isTransient = err.code === 'P1001' || err.code === 'P2024' || err.code === 'P1008';
-            if (!isTransient || i === maxRetries - 1) throw err;
+            if (!isTransient || i === maxRetries - 1) {
+                if (isTransient) {
+                    console.error(`❌ Prisma transient error ${err.code} exhausted all ${maxRetries} retries.`);
+                }
+                throw err;
+            }
 
-            const delay = Math.pow(2, i) * 500; // 500ms, 1000ms, 2000ms
+            const delay = Math.pow(2, i) * 1000; // Increased base delay to 1s
             console.warn(`⚠️ Prisma transient error ${err.code}. Retrying in ${delay}ms... (Attempt ${i + 1}/${maxRetries})`);
             await new Promise(r => setTimeout(r, delay));
         }
