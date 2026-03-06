@@ -3,7 +3,7 @@ services:
     name: urban-cabz-backend
     env: node
     plan: free
-    buildCommand: npm install && npx prisma generate
+    buildCommand: npm install && npx prisma migrate deploy && npx prisma generate
     startCommand: npm start
     envVars:
       - key: NODE_ENV
