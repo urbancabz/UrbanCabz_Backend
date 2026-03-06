@@ -161,7 +161,7 @@ const withRetry = async (fn, maxRetries = 3) => {
 const warmupDatabase = async () => {
     console.log('⏳ Warming up database connection...');
     try {
-        await withRetry(() => prisma.$queryRaw`SELECT 1`, 5);
+        await withRetry(() => prisma.pricing_settings.findFirst(), 5);
         console.log('✅ Prisma database connection warmed up successfully.');
     } catch (err) {
         console.warn('❌ Warm-up failed after multiple attempts:', err.message);
