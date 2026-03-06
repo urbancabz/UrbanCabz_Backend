@@ -1,5 +1,13 @@
 const path = require('path');
 require('dotenv').config({ path: path.resolve(__dirname, '../.env'), override: true });
+
+// Force session pooler (port 5432) — Render blocks port 6543 (transaction pooler)
+if (process.env.DATABASE_URL) {
+    process.env.DATABASE_URL = process.env.DATABASE_URL.replace(':6543', ':5432').replace('?pgbouncer=true', '').replace('&pgbouncer=true', '').split('&connection_limit')[0].split('&pool_timeout')[0].split('&connect_timeout')[0];
+}
+if (process.env.DIRECT_URL) {
+    process.env.DIRECT_URL = process.env.DIRECT_URL.replace(':6543', ':5432').replace('?pgbouncer=true', '').replace('&pgbouncer=true', '').split('&connection_limit')[0].split('&pool_timeout')[0].split('&connect_timeout')[0];
+}
 const app = require('./app');
 const prisma = require('./config/prisma');
 const { warmupDatabase } = require('./config/prisma');
