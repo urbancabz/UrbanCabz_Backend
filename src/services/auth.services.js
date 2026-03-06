@@ -75,7 +75,7 @@ async function register({ email: rawEmail, password, name, phone, roleName = 'cu
   return { user: toPublicUser(user, role.name), token };
 }
 
-async function login({ email: rawEmail, password }) {
+async function login({ email: rawEmail, password, loginType = 'customer' }) {
   const email = rawEmail.toLowerCase();
   const user = await prisma.user.findUnique({
     where: { email },

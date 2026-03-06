@@ -56,11 +56,8 @@ async function preloadCaches() {
 // and they ALL timeout at 20 seconds, crashing the server.
 // ═══════════════════════════════════════════════════════════════
 async function startServer() {
-    console.log('⏳ Warming up database connection...');
-
     try {
         await warmupDatabase();
-        console.log('✅ Database connection established.');
 
         // Preload caches AFTER warmup completes
         await preloadCaches();

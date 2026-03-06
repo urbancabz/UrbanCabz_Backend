@@ -1,74 +1,75 @@
 /**
  * Request Deduplication Middleware
- * 
- * If 5 simultaneous GET requests hit the same endpoint (e.g. /admin/dashboard-sync),
- * only 1 DB query runs and all 5 get the same response.
- * 
- * This dramatically reduces connection pool pressure under multi-user/multi-tab load.
- * 
- * Only applies to GET requests — mutations (POST/PUT/DELETE) always pass through.
+ *
+ * If 5 simultaneous GET requests hit the same endpoint, only 1 DB query runs
+ * and all 5 get the same response. This cuts connection pool pressure under
+ * multi-tab / multi-user burst load.
+ *
+ * KEY SCOPING (critical for security):
+ *   - Authenticated requests: key = userId + url  → each user gets their own data
+ *   - Public requests:        key = url only
+ *
+ * Only applies to GET requests — mutations always pass through.
  */
 
 const inFlight = new Map();
 
-// Auto-cleanup stale entries after 10 seconds to prevent memory leaks
-const STALE_TIMEOUT = 10_000;
+// Safety net: auto-remove stale entries so memory doesn't leak if a response
+// never fires (e.g. connection dropped before res.json).
+const STALE_TIMEOUT_MS = 10_000;
 
 const dedupe = (req, res, next) => {
-    if (req.method !== 'GET') return next();
+  if (req.method !== 'GET') return next();
 
-    const key = req.originalUrl;
+  // Include userId so authenticated users never share each other's responses.
+  // req.user is set by auth middleware (if present). Falls back to empty string
+  // for public routes so they still benefit from deduplication.
+  const userId = (req.user && req.user.userId) ? String(req.user.userId) : '';
+  const key = `${userId}:${req.originalUrl}`;
 
-    // If an identical request is already in-flight, piggyback on its promise
   if (inFlight.has(key)) {
-      inFlight.get(key).promise
-          .then(data => {
-              if (data && data.__dedupe_failed) {
-                  if (!res.headersSent) next();
-                  return;
-              }
-              if (!res.headersSent) res.json(data);
-          })
-          .catch(() => {
-              if (!res.headersSent) next();
-          });
-      return;
+    inFlight.get(key).promise
+      .then((data) => {
+        if (data && data.__dedupe_failed) {
+          if (!res.headersSent) next();
+          return;
+        }
+        if (!res.headersSent) res.json(data);
+      })
+      .catch(() => {
+        if (!res.headersSent) next();
+      });
+    return;
   }
 
-  // Create a deferred promise for this request.
-  // This promise should never reject; rejection here can become unhandled
-  // (first request has no catch attached) and crash Node.
   let resolve;
   const promise = new Promise((r) => { resolve = r; });
 
-  // Safety: auto-cleanup after 10s in case response never fires
   const timer = setTimeout(() => {
-      inFlight.delete(key);
-      resolve({ __dedupe_failed: true });
-  }, STALE_TIMEOUT);
+    inFlight.delete(key);
+    resolve({ __dedupe_failed: true });
+  }, STALE_TIMEOUT_MS);
 
-    inFlight.set(key, { promise, timer });
+  inFlight.set(key, { promise, timer });
 
-    // Intercept res.json to capture the response data
-    const originalJson = res.json.bind(res);
-    res.json = (data) => {
-        clearTimeout(timer);
-        resolve(data);
-        inFlight.delete(key);
-        return originalJson(data);
-    };
+  const originalJson = res.json.bind(res);
+  res.json = (data) => {
+    clearTimeout(timer);
+    resolve(data);
+    inFlight.delete(key);
+    return originalJson(data);
+  };
 
-    // Handle errors/aborts without rejecting (avoid unhandled rejections)
-    const cleanup = () => {
-        clearTimeout(timer);
-        resolve({ __dedupe_failed: true });
-        inFlight.delete(key);
-    };
+  const cleanup = () => {
+    clearTimeout(timer);
+    resolve({ __dedupe_failed: true });
+    inFlight.delete(key);
+  };
 
-    res.on('close', cleanup);
-    res.on('error', cleanup);
+  res.on('close', cleanup);
+  res.on('error', cleanup);
 
-    next();
+  next();
 };
 
 module.exports = dedupe;

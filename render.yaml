@@ -3,8 +3,9 @@ services:
     name: urban-cabz-backend
     env: node
     plan: free
-    buildCommand: npm install && npx prisma migrate deploy && npx prisma generate
+    buildCommand: npm install && npx prisma generate
     startCommand: npm start
+    healthCheckPath: /health
     envVars:
       - key: NODE_ENV
         value: production
@@ -49,4 +50,6 @@ services:
       - key: EMAIL_PASS
         sync: false
       - key: EMAIL_VERIFY_ON_BOOT
+        sync: false
+      - key: FRONTEND_URL
         sync: false

@@ -1,8 +1,13 @@
 const { PrismaClient } = require('@prisma/client');
 
-const DEFAULT_POOL_TIMEOUT_SECONDS = 120;
-const DEFAULT_CONNECTION_LIMIT = 20;
-const DEFAULT_CONNECT_TIMEOUT_SECONDS = 15;
+// Supabase free tier: max 10 direct DB connections shared across all services.
+// Using the pgbouncer pooler (port 6543) multiplexes many app connections into
+// fewer real DB connections, so connection_limit here is the Prisma pool size
+// (app-side), not the raw Postgres connection count.
+// 10 is safe: leaves headroom for Supabase dashboard, migrations, etc.
+const DEFAULT_POOL_TIMEOUT_SECONDS = 120;  // Wait up to 2 min for a pool slot
+const DEFAULT_CONNECTION_LIMIT = 10;        // Prisma app-side pool (via pgbouncer)
+const DEFAULT_CONNECT_TIMEOUT_SECONDS = 30; // TCP connect timeout
 
 const POSTGRES_PROTOCOL_REGEX = /^postgres(?:ql)?:\/\//i;
 const DATABASE_URL_PREFIX_REGEX = /^DATABASE_URL\s*=\s*/i;
