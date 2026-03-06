@@ -1,11 +1,13 @@
 const { PrismaClient } = require('@prisma/client');
 
-// Using Supabase direct connection (db.xxx.supabase.co:5432) which supports IPv6.
-// Render free tier is IPv6-only; the pooler (pooler.supabase.com) is IPv4-only and unreachable.
-// Direct connection limit on Supabase free tier = 20. Keep connection_limit very low.
-const DEFAULT_POOL_TIMEOUT_SECONDS = 120;
-const DEFAULT_CONNECTION_LIMIT = 3;
-const DEFAULT_CONNECT_TIMEOUT_SECONDS = 30;
+// Supabase free tier: max 10 direct DB connections shared across all services.
+// Using the pgbouncer pooler (port 6543) multiplexes many app connections into
+// fewer real DB connections, so connection_limit here is the Prisma pool size
+// (app-side), not the raw Postgres connection count.
+// 10 is safe: leaves headroom for Supabase dashboard, migrations, etc.
+const DEFAULT_POOL_TIMEOUT_SECONDS = 120;  // 2 min
+const DEFAULT_CONNECTION_LIMIT = 10;        // Safer for Supabase free tier
+const DEFAULT_CONNECT_TIMEOUT_SECONDS = 30; // TCP connect timeout
 
 const POSTGRES_PROTOCOL_REGEX = /^postgres(?:ql)?:\/\//i;
 const DATABASE_URL_PREFIX_REGEX = /^DATABASE_URL\s*=\s*/i;
@@ -104,8 +106,31 @@ function buildPrismaUrl() {
             10
         );
 
-        // Direct connection: remove pgbouncer param if present (not valid for direct connections).
-        url.searchParams.delete('pgbouncer');
+        // Render free tier is IPv6-only. Supabase pooler (pooler.supabase.com) is
+        // IPv4-only — so neither port 5432 nor 6543 on the pooler host is reachable
+        // from Render free tier. The only free solution is the direct connection host
+        // (db.<ref>.supabase.co) which resolves over IPv6.
+        //
+        // If a pooler URL is detected, rewrite to the direct host automatically.
+        if (url.hostname.includes('pooler.supabase.com')) {
+            // Extract project ref from username (format: postgres.<ref>) or from the pooler URL pattern
+            const usernameParts = decodeURIComponent(url.username).split('.');
+            const projectRef = usernameParts.length > 1 ? usernameParts[1] : null;
+
+            if (projectRef) {
+                url.hostname = `db.${projectRef}.supabase.co`;
+                url.port = '5432';
+                url.username = 'postgres';
+                // Direct connection does NOT use pgbouncer — remove that param
+                url.searchParams.delete('pgbouncer');
+                console.warn(`⚠️ Pooler URL detected — auto-switched to direct host db.${projectRef}.supabase.co:5432 (IPv6 compatible for Render free tier).`);
+            } else {
+                // Fallback: just force port 5432
+                url.port = '5432';
+                url.searchParams.delete('pgbouncer');
+                console.warn('⚠️ Pooler URL detected — switched to port 5432 and removed pgbouncer param.');
+            }
+        }
 
         return url.toString();
     } catch {
