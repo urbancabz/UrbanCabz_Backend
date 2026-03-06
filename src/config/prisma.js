@@ -106,31 +106,6 @@ function buildPrismaUrl() {
             10
         );
 
-        // Render free tier is IPv6-only. Supabase pooler (pooler.supabase.com) is
-        // IPv4-only — so neither port 5432 nor 6543 on the pooler host is reachable
-        // from Render free tier. The only free solution is the direct connection host
-        // (db.<ref>.supabase.co) which resolves over IPv6.
-        //
-        // If a pooler URL is detected, rewrite to the direct host automatically.
-        if (url.hostname.includes('pooler.supabase.com')) {
-            // Extract project ref from username (format: postgres.<ref>) or from the pooler URL pattern
-            const usernameParts = decodeURIComponent(url.username).split('.');
-            const projectRef = usernameParts.length > 1 ? usernameParts[1] : null;
-
-            if (projectRef) {
-                url.hostname = `db.${projectRef}.supabase.co`;
-                url.port = '5432';
-                url.username = 'postgres';
-                // Direct connection does NOT use pgbouncer — remove that param
-                url.searchParams.delete('pgbouncer');
-                console.warn(`⚠️ Pooler URL detected — auto-switched to direct host db.${projectRef}.supabase.co:5432 (IPv6 compatible for Render free tier).`);
-            } else {
-                // Fallback: just force port 5432
-                url.port = '5432';
-                url.searchParams.delete('pgbouncer');
-                console.warn('⚠️ Pooler URL detected — switched to port 5432 and removed pgbouncer param.');
-            }
-        }
 
         return url.toString();
     } catch {
@@ -165,7 +140,7 @@ const withRetry = async (fn, maxRetries = 3) => {
             lastError = err;
             const isTransient = err.code === 'P1001' || err.code === 'P2024' || err.code === 'P1008';
             if (!isTransient || i === maxRetries - 1) throw err;
-            
+
             const delay = Math.pow(2, i) * 500; // 500ms, 1000ms, 2000ms
             console.warn(`⚠️ Prisma transient error ${err.code}. Retrying in ${delay}ms... (Attempt ${i + 1}/${maxRetries})`);
             await new Promise(r => setTimeout(r, delay));
