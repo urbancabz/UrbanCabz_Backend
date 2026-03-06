@@ -106,11 +106,14 @@ function buildPrismaUrl() {
             10
         );
 
-        // Render blocks outbound port 6543. Force session pooler (5432) always.
+        // Supabase transaction pooler uses port 6543; session pooler uses 5432.
+        // Both ports work on Render, but session pooler (5432) is preferred for
+        // Prisma because it supports prepared statements. Force 5432 if 6543 is set.
         if (url.port === '6543') {
             url.port = '5432';
-            url.searchParams.delete('pgbouncer');
-            console.warn('⚠️ DATABASE_URL had port 6543 — forced to 5432 (Render blocks 6543).');
+            // Keep pgbouncer=true — Prisma still needs it for the pooler at 5432.
+            url.searchParams.set('pgbouncer', 'true');
+            console.warn('⚠️ DATABASE_URL had port 6543 — switched to session pooler port 5432.');
         }
 
         return url.toString();
@@ -158,7 +161,7 @@ const withRetry = async (fn, maxRetries = 3) => {
 /**
  * Warm up the database connection at startup with aggressive retries.
  */
-const warmupDatabase = async (maxAttempts = 5, delayMs = 3000) => {
+const warmupDatabase = async (maxAttempts = 8, delayMs = 5000) => {
     console.log('⏳ Warming up database connection...');
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
         try {
