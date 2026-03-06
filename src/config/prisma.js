@@ -1,7 +1,30 @@
 const { PrismaClient } = require('@prisma/client');
 
-const DEFAULT_POOL_TIMEOUT_SECONDS = 60;
+const DEFAULT_POOL_TIMEOUT_SECONDS = 120;
 const DEFAULT_CONNECTION_LIMIT = 20;
+const DEFAULT_CONNECT_TIMEOUT_SECONDS = 15;
+
+function applyNumericParam(url, key, envValue, defaultValue, minValue) {
+    const fromEnv = envValue !== undefined && envValue !== null && String(envValue).trim() !== '';
+
+    if (fromEnv) {
+        const parsed = Number.parseInt(String(envValue), 10);
+        if (Number.isFinite(parsed) && parsed > 0) {
+            url.searchParams.set(key, String(parsed));
+            return;
+        }
+    }
+
+    const existing = url.searchParams.get(key);
+    if (existing) {
+        const parsedExisting = Number.parseInt(existing, 10);
+        if (Number.isFinite(parsedExisting) && parsedExisting >= minValue) {
+            return;
+        }
+    }
+
+    url.searchParams.set(key, String(defaultValue));
+}
 
 function buildPrismaUrl() {
     const rawUrl = process.env.DATABASE_URL;
@@ -10,20 +33,33 @@ function buildPrismaUrl() {
     try {
         const url = new URL(rawUrl);
 
-        // Respect values already present in DATABASE_URL.
-        // Allow explicit override through env vars when needed.
-        const poolTimeout = process.env.PRISMA_POOL_TIMEOUT;
-        if (poolTimeout) {
-            url.searchParams.set('pool_timeout', String(poolTimeout));
-        } else if (!url.searchParams.get('pool_timeout')) {
-            url.searchParams.set('pool_timeout', String(DEFAULT_POOL_TIMEOUT_SECONDS));
-        }
+        applyNumericParam(
+            url,
+            'pool_timeout',
+            process.env.PRISMA_POOL_TIMEOUT,
+            DEFAULT_POOL_TIMEOUT_SECONDS,
+            60
+        );
 
-        const connectionLimit = process.env.PRISMA_CONNECTION_LIMIT;
-        if (connectionLimit) {
-            url.searchParams.set('connection_limit', String(connectionLimit));
-        } else if (!url.searchParams.get('connection_limit')) {
-            url.searchParams.set('connection_limit', String(DEFAULT_CONNECTION_LIMIT));
+        applyNumericParam(
+            url,
+            'connection_limit',
+            process.env.PRISMA_CONNECTION_LIMIT,
+            DEFAULT_CONNECTION_LIMIT,
+            10
+        );
+
+        applyNumericParam(
+            url,
+            'connect_timeout',
+            process.env.PRISMA_CONNECT_TIMEOUT,
+            DEFAULT_CONNECT_TIMEOUT_SECONDS,
+            10
+        );
+
+        // Supabase pooler benefits from explicit pgbouncer mode for Prisma.
+        if (!url.searchParams.get('pgbouncer')) {
+            url.searchParams.set('pgbouncer', 'true');
         }
 
         return url.toString();
