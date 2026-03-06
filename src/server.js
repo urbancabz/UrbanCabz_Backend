@@ -1,14 +1,9 @@
 const path = require('path');
 require('dotenv').config({ path: path.resolve(__dirname, '../.env'), override: true });
 
-// Force session pooler (port 5432) — Render blocks port 6543 (transaction pooler)
-// But only do this on Render/production. Local development should use the preferred port.
-if (process.env.RENDER && process.env.DATABASE_URL) {
-    process.env.DATABASE_URL = process.env.DATABASE_URL.replace(':6543', ':5432').replace('?pgbouncer=true', '').replace('&pgbouncer=true', '').split('&connection_limit')[0].split('&pool_timeout')[0].split('&connect_timeout')[0];
-}
-if (process.env.RENDER && process.env.DIRECT_URL) {
-    process.env.DIRECT_URL = process.env.DIRECT_URL.replace(':6543', ':5432').replace('?pgbouncer=true', '').replace('&pgbouncer=true', '').split('&connection_limit')[0].split('&pool_timeout')[0].split('&connect_timeout')[0];
-}
+// Use the DATABASE_URL as provided in the environment. 
+// We previously forced port 5432 on Render, but logs show 5432 is failing 
+// while 6543 (Transaction Mode) handled 100+ concurrent requests successfully.
 const app = require('./app');
 const prisma = require('./config/prisma');
 const { warmupDatabase } = require('./config/prisma');
