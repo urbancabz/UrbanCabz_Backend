@@ -2,7 +2,26 @@
 
 const { PrismaClient } = require('@prisma/client');
 
-let prisma = global.prisma ?? new PrismaClient({ log: ['error', 'warn'] });
+// Ensure the connection string forces long timeouts so Render has time to wake Supabase
+const getOptimizedUrl = () => {
+    let url = process.env.DATABASE_URL || '';
+    if (url && !url.includes('connect_timeout')) {
+        url += url.includes('?') ? '&' : '?';
+        url += 'connect_timeout=60&pool_timeout=60&socket_timeout=60';
+    }
+    return url;
+};
+
+const createPrismaClient = () => {
+    return new PrismaClient({
+        log: ['error', 'warn'],
+        datasources: {
+            db: { url: getOptimizedUrl() }
+        }
+    });
+};
+
+let prisma = global.prisma ?? createPrismaClient();
 global.prisma = prisma;
 
 let isReconnecting = false;
@@ -15,7 +34,8 @@ const reconnectPrisma = async () => {
     isReconnecting = true;
     try { await prisma.$disconnect(); } catch (_) { }
     await new Promise(r => setTimeout(r, 15000));
-    prisma = new PrismaClient({ log: ['error', 'warn'] });
+
+    prisma = createPrismaClient();
     global.prisma = prisma;
     for (let i = 0; i < 5; i++) {
         try {
