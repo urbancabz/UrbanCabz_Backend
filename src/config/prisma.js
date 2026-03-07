@@ -16,12 +16,18 @@ const prisma = new PrismaClient({
  */
 const warmupDatabase = async () => {
     console.log('⏳ Warming up database connection...');
-    try {
-        await prisma.$queryRaw`SELECT 1`;
-        console.log('✅ Prisma database connection warmed up successfully.');
-    } catch (err) {
-        console.warn('⚠️ Warm-up failed, continuing anyway:', err.message);
+    for (let i = 0; i < 8; i++) {
+        try {
+            await prisma.$queryRaw`SELECT 1`;
+            console.log('✅ Prisma database connection warmed up successfully.');
+            return;
+        } catch (err) {
+            console.warn(`⏳ DB not ready (${i + 1}/8), retrying in 5s... [${err.code || 'timeout'}]`);
+            // Wait 5 seconds before trying again
+            await new Promise(r => setTimeout(r, 5000));
+        }
     }
+    console.warn('⚠️ Warm-up failed completely after 40 seconds. Server will start, but first requests may fail.');
 };
 
 // Graceful shutdown — release DB connections cleanly
