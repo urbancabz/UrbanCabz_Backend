@@ -58,6 +58,22 @@ const warmupDatabase = async (maxAttempts = 10, delayMs = 5000) => {
             return;
         } catch (err) {
             console.warn(`⚠️ DB Warm-up attempt ${attempt}/${maxAttempts} failed: ${err.message}`);
+            
+            // Helpful diagnostics for local developers
+            if (err.message.includes('Can\'t reach database server')) {
+                console.error('\n❌ LOCAL CONNECTIVITY ERROR DETECTED:');
+                
+                if (process.env.DATABASE_URL && process.env.DATABASE_URL.includes(':5432')) {
+                    console.error('⚠️  YOUR DATABASE_URL IS USING PORT 5432 (Session Pooler).');
+                    console.error('⚠️  Prisma works most reliably with the Transaction Pooler (Port 6543).');
+                    console.error('👉 Please update your .env to use the URL provided in the Supabase Dashboard -> Settings -> Database -> Connection string (Node.js/Prisma -> Transaction Mode).');
+                }
+
+                console.error('1. Check if your public IP is whitelisted in Supabase Settings -> Database -> Network Restriction.');
+                console.error('2. Ensure port 5432 or 6543 isn\'t blocked by your ISP or Firewall.');
+                console.error('3. Check if your database is "Paused" in the Supabase Dashboard.\n');
+            }
+
             if (attempt < maxAttempts) {
                 console.log(`⏳ Waiting ${delayMs}ms before retry...`);
                 await new Promise(res => setTimeout(res, delayMs));
@@ -65,7 +81,7 @@ const warmupDatabase = async (maxAttempts = 10, delayMs = 5000) => {
         }
     }
     console.error('❌ FATAL: Could not connect to database after maximum retries.');
-    throw new Error('Database connection failed');
+    throw new Error('Database connection failed - please whitelist your IP in the Supabase dashboard.');
 };
 
 // Graceful shutdown — release DB connections cleanly
