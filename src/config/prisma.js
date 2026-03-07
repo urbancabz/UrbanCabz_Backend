@@ -7,14 +7,26 @@ function buildPrismaUrl(url) {
     if (!url) return url;
     let newUrl = url.trim();
     
-    // Add pgbouncer=true for transaction mode (port 6543)
+    // Base parameters for Supabase stability
+    const params = [];
     if (newUrl.includes(':6543') && !newUrl.includes('pgbouncer=true')) {
-        newUrl += (newUrl.includes('?') ? '&' : '?') + 'pgbouncer=true';
+        params.push('pgbouncer=true');
+    }
+    if (!newUrl.includes('sslmode=')) {
+        params.push('sslmode=require');
     }
     
-    // Ensure sslmode=require
-    if (!newUrl.includes('sslmode=')) {
-        newUrl += (newUrl.includes('?') ? '&' : '?') + 'sslmode=require';
+    // CRITICAL: Lower connection limit for Supabase Free Tier (Max 10 total)
+    // We use 3 to leave room for migrations, dashboard, and Render zero-downtime deploys.
+    if (!newUrl.includes('connection_limit=')) {
+        params.push('connection_limit=3');
+    }
+    if (!newUrl.includes('pool_timeout=')) {
+        params.push('pool_timeout=60'); // 60 seconds wait instead of 10
+    }
+    
+    if (params.length > 0) {
+        newUrl += (newUrl.includes('?') ? '&' : '?') + params.join('&');
     }
     
     return newUrl;

@@ -8,8 +8,8 @@
  * MAX_CONCURRENT must be LESS than the Prisma connection_limit (8)
  * to leave room for heartbeat + system queries.
  */
-const MAX_CONCURRENT = 6; // Pool is 8 — leave 2 slots for startup/system queries
-const MAX_QUEUE = 50;     // Don't queue more than 50 requests
+const MAX_CONCURRENT = 3; // Match the lowered pool size (3) to prevent P2024 exhaustion
+const MAX_QUEUE = 100;    // Allow more requests to queue gracefully under load
 
 let activeCount = 0;
 const queue = [];
