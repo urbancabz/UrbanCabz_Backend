@@ -6,8 +6,23 @@ const { PrismaClient } = require('@prisma/client');
  * DATABASE_URL is set directly in Render environment variables.
  * No URL manipulation here — what you set in Render is exactly what Prisma uses.
  */
+// Render Environment Variable Fix:
+// If the user accidentally pasted `DATABASE_URL=...` or wrapped it in quotes `"postgresql://..."`
+// inside the Render dashboard, this cleans it up because Prisma fails if it doesn't start with postgresql://.
+let safeUrl = process.env.DATABASE_URL || '';
+safeUrl = safeUrl.replace(/^DATABASE_URL\s*=\s*/i, '').replace(/^['"`]+|['"`]+$/g, '').trim();
+if (safeUrl) {
+    process.env.DATABASE_URL = safeUrl; // Ensure internal Prisma engines use the cleaned URL
+}
+
+/**
+ * Single shared PrismaClient instance.
+ * DATABASE_URL is set directly in Render environment variables.
+ * No URL manipulation here — what you set in Render is exactly what Prisma uses.
+ */
 const prisma = new PrismaClient({
     log: ['error'],
+    datasources: safeUrl ? { db: { url: safeUrl } } : undefined
 });
 
 /**
