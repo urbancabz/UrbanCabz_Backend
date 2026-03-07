@@ -55,18 +55,36 @@ async function preloadCaches() {
 // ═══════════════════════════════════════════════════════════════
 // WARM-UP: Establish a DB connection BEFORE accepting any traffic.
 // On Render free tier, Supabase's pooler can take 10-30 seconds
-// to wake up. If we accept requests before the pool is ready,
-// every single request queues against the pool simultaneously
-// and they ALL timeout at 20 seconds, crashing the server.
+// to wake up. We wait for a successful ping before binding to the port.
 // ═══════════════════════════════════════════════════════════════
-app.listen(PORT, () => {
-    console.log(`Server listening on ${PORT}`);
+console.log('🚀 Starting server initialization...');
 
-    // Run DB warmup and cache preload asynchronously in the background.
-    // We DO NOT await this before listening, so Render's port binding health checks pass immediately.
-    warmupDatabase()
-        .then(() => preloadCaches())
-        .catch(err => {
-            console.warn('⚠️ Background database warmup/preload failed. The server is still running, but initial queries may fail or trace timeouts:', err.message);
+warmupDatabase()
+    .then(() => {
+        app.listen(PORT, () => {
+            console.log(`✅ Server listening on ${PORT}`);
+            preloadCaches().catch(err => {
+                console.warn('⚠️ Background cache preload failed:', err.message);
+            });
         });
-});
+    })
+    .catch(err => {
+        console.error('❌ FATAL: Database warmup failed completely after max retries.', err);
+        process.exit(1);
+    });
+
+// ─── GRACEFUL SHUTDOWN ──────────────────────────────────────────────────────
+const gracefulShutdown = async (signal) => {
+    console.log(`\n🛑 ${signal} received. Closing database connections gracefully...`);
+    try {
+        await prisma.$disconnect();
+        console.log('✅ Prisma disconnected successfully.');
+        process.exit(0);
+    } catch (err) {
+        console.error('❌ Error during database disconnect:', err.message);
+        process.exit(1);
+    }
+};
+
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));

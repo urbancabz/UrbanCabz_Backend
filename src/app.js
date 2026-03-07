@@ -152,16 +152,22 @@ app.use('/api/v1/b2b', b2bRoutes);
 app.use('/api/v1/fleet', fleetRoutes);
 app.use('/api/v1/pricing', require('./routes/pricing.routes'));
 
-// ─── HEALTH CHECK ─────────────────────────────────────────────────────────────
-// Render pings this every 30s. We do a lightweight DB ping so Render marks the
-// service as unhealthy if the DB connection pool is dead.
+// ─── HEALTH CHECK (Stateless) ─────────────────────────────────────────────────
+// A lightweight route that DOES NOT query the database.
+// Used by cron-job.org to keep the Render server awake without exhausting Supabase connections.
+app.get('/health', (req, res) => {
+  return res.status(200).send("OK");
+});
+
+// ─── DATABASE HEALTH CHECK ──────────────────────────────────────────────────
+// Render pings this if you want to verify DB up-status.
 const prisma = require('./config/prisma');
-app.get('/health', async (req, res) => {
+app.get('/health/db', async (req, res) => {
   try {
     await prisma.$queryRaw`SELECT 1`;
-    return res.status(200).json({ ok: true, database: 'connected', timestamp: new Date().toISOString() });
+    return res.status(200).json({ status: 'ok', db: 'connected', timestamp: new Date().toISOString() });
   } catch (err) {
-    return res.status(503).json({ ok: false, database: 'unreachable', timestamp: new Date().toISOString() });
+    return res.status(503).json({ status: 'error', db: 'unreachable', timestamp: new Date().toISOString() });
   }
 });
 
