@@ -7,11 +7,11 @@ const BASE_URL = 'https://urbancabz-backend.onrender.com';
 const JWT_SECRET = 'jHSKjshfKJUBAjh2394234jsdf'; 
 
 const ACTIONS = {
-    REGISTER: 20,       
-    BOOK_B2C: 20,       
-    BOOK_B2B: 20,       
-    DASH_B2B: 30,  
-    DASH_ADMIN: 10, 
+    REGISTER: 5,       
+    BOOK_B2C: 5,       
+    BOOK_B2B: 5,       
+    DASH_B2B: 5,  
+    DASH_ADMIN: 5, 
 };
 
 const B2C_USER = { id: 31, role: 'customer' };
