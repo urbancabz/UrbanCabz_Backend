@@ -24,36 +24,34 @@ async function createBookingAfterPayment({
     throw { status: 400, message: 'totalAmount is required' };
   }
 
-  // Wrap in a transaction so booking + payment are always consistent
-  const [booking] = await prisma.$transaction([
-    prisma.booking.create({
-      data: {
-        user_id: userId,
-        pickup_location: pickupLocation,
-        drop_location: dropLocation,
-        scheduled_at: scheduledAt || null,
-        distance_km: distanceKm || null,
-        estimated_fare: estimatedFare || null,
-        total_amount: totalAmount,
-        car_model: carModel || null, // Save car model
-        status: 'PAID',
-        payments: paymentPayload
-          ? {
-            create: {
-              amount: paymentPayload.amount,
-              currency: paymentPayload.currency || 'INR',
-              status: paymentPayload.status || 'SUCCESS',
-              provider: paymentPayload.provider || 'unknown',
-              provider_txn_id: paymentPayload.providerTxnId || null
-            }
+  // Wrap in a single query so booking + payment are always consistent
+  const booking = await prisma.booking.create({
+    data: {
+      user_id: userId,
+      pickup_location: pickupLocation,
+      drop_location: dropLocation,
+      scheduled_at: scheduledAt || null,
+      distance_km: distanceKm || null,
+      estimated_fare: estimatedFare || null,
+      total_amount: totalAmount,
+      car_model: carModel || null, // Save car model
+      status: 'PAID',
+      payments: paymentPayload
+        ? {
+          create: {
+            amount: paymentPayload.amount,
+            currency: paymentPayload.currency || 'INR',
+            status: paymentPayload.status || 'SUCCESS',
+            provider: paymentPayload.provider || 'unknown',
+            provider_txn_id: paymentPayload.providerTxnId || null
           }
-          : undefined
-      },
-      include: {
-        payments: true
-      }
-    })
-  ]);
+        }
+        : undefined
+    },
+    include: {
+      payments: true
+    }
+  });
 
   return booking;
 }
@@ -145,22 +143,23 @@ async function updateBookingAfterPaymentSuccess({
   const isFullPayment = payment.remaining_amount === 0 || payment.remaining_amount === null;
 
   // Update payment and booking in transaction
-  const [updatedPayment, updatedBooking] = await prisma.$transaction([
-    prisma.payment.update({
+  const result = await prisma.$transaction(async (tx) => {
+    const updatedPayment = await tx.payment.update({
       where: { id: payment.id },
       data: {
         status: 'SUCCESS',
         provider_txn_id: razorpayPaymentId // Update with actual payment_id
       }
-    }),
-    prisma.booking.update({
+    });
+    const updatedBooking = await tx.booking.update({
       where: { id: payment.booking_id },
       data: {
         // Only mark as PAID if it's a full payment, otherwise keep as PENDING_PAYMENT
         status: isFullPayment ? 'PAID' : 'PENDING_PAYMENT'
       }
-    })
-  ]);
+    });
+    return { updatedPayment, updatedBooking };
+  });
 
   // Return booking with updated payment and user details (phone, name, etc.)
   const booking = await prisma.booking.findUnique({

@@ -69,7 +69,18 @@ async function startServer() {
         console.error(err.message);
     }
 
-    app.listen(PORT, () => console.log(`Server listening on ${PORT}`));
+    app.listen(PORT, () => {
+        console.log(`Server listening on ${PORT}`);
+
+        // Keep-alive mechanism to prevent Render from sleeping (free tier sleeps after 15 mins)
+        setInterval(() => {
+            const url = process.env.RENDER_EXTERNAL_URL || 'https://urbancabz-backend.onrender.com';
+            console.log(`PINGING self at ${url}/health to prevent sleep...`);
+            fetch(`${url}/health`)
+                .then(res => console.log(`Keep-alive ping successful: ${res.status}`))
+                .catch(err => console.error(`Keep-alive ping failed:`, err.message));
+        }, 14 * 60 * 1000); // 14 minutes
+    });
 }
 
 startServer();

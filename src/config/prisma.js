@@ -7,6 +7,11 @@ const { PrismaClient } = require('@prisma/client');
  */
 const prisma = new PrismaClient({
     log: ['error'],
+    datasources: {
+        db: {
+            url: process.env.DATABASE_URL
+        }
+    }
 });
 
 /**
@@ -14,14 +19,19 @@ const prisma = new PrismaClient({
  * A single lightweight query to verify the pool is ready before traffic arrives.
  * Logs a warning and continues if it fails — the server will still start.
  */
-const warmupDatabase = async () => {
-    console.log('⏳ Warming up database connection...');
-    try {
-        await prisma.$queryRaw`SELECT 1`;
-        console.log('✅ Prisma database connection warmed up successfully.');
-    } catch (err) {
-        console.warn('⚠️ Warm-up failed, continuing anyway:', err.message);
+const warmupDatabase = async (maxAttempts = 5, delayMs = 5000) => {
+    console.log('⏳ Warming up database connection (SELECT 1)...');
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        try {
+            await prisma.$queryRaw`SELECT 1`;
+            console.log('✅ Prisma database connection warmed up successfully.');
+            return;
+        } catch (err) {
+            console.warn(`⚠️ DB Warm-up attempt ${attempt}/${maxAttempts} failed, retrying in ${delayMs}ms...: ${err.message}`);
+            if (attempt < maxAttempts) await new Promise(res => setTimeout(res, delayMs));
+        }
     }
+    console.warn('⚠️ Warm-up failed — continuing anyway');
 };
 
 // Graceful shutdown — release DB connections cleanly
