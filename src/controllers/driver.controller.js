@@ -1,4 +1,4 @@
-const { prisma } = require('../config/prisma');
+const prisma = require('../config/prisma');
 const cache = require('../utils/cache');
 
 // ===================== DRIVER REGISTRY CRUD =====================

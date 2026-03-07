@@ -1,6 +1,6 @@
 // src/controllers/admin.controller.js
 const { withRetry } = require('../config/prisma');
-const { prisma } = require('../config/prisma');
+const prisma = require('../config/prisma');
 const cache = require('../utils/cache');
 
 const BOOKINGS_CACHE_TTL = 65; // 65 seconds — survives 60s frontend polling

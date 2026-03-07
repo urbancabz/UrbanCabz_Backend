@@ -2,7 +2,8 @@ const path = require('path');
 require('dotenv').config({ path: path.resolve(__dirname, '../.env'), override: true });
 
 const app = require('./app');
-const { prisma, warmupDatabase } = require('./config/prisma');
+const prisma = require('./config/prisma');
+const { warmupDatabase } = require('./config/prisma');
 const cache = require('./utils/cache');
 
 const PORT = process.env.PORT || 5050;

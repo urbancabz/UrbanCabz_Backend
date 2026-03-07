@@ -1,4 +1,4 @@
-const { prisma } = require('../config/prisma');
+const prisma = require('../config/prisma');
 const cache = require('../utils/cache');
 
 const PRICING_CACHE_KEY = 'pricing_settings';

@@ -153,20 +153,14 @@ app.use('/api/v1/fleet', fleetRoutes);
 app.use('/api/v1/pricing', require('./routes/pricing.routes'));
 
 // ─── HEALTH CHECK ─────────────────────────────────────────────────────────────
-const { prisma } = require('./config/prisma');
-const { reconnectPrisma } = require('./config/prisma');
+const prisma = require('./config/prisma');
 
 app.get('/health', async (req, res) => {
   try {
     await prisma.$queryRaw`SELECT 1`;
     res.status(200).json({ status: 'ok', db: 'connected', timestamp: new Date() });
   } catch (err) {
-    try {
-      await reconnectPrisma();
-      res.status(200).json({ status: 'recovered', db: 'reconnected', timestamp: new Date() });
-    } catch (e) {
-      res.status(503).json({ status: 'error', db: 'unreachable' });
-    }
+    res.status(503).json({ status: 'error', db: 'unreachable' });
   }
 });
 
