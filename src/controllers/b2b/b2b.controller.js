@@ -1,5 +1,5 @@
 const { withRetry } = require('../../config/prisma');
-const prisma = require('../../config/prisma');
+const { prisma } = require('../../config/prisma');
 const cache = require('../../utils/cache');
 const bcrypt = require('bcryptjs');
 const bookingService = require('../../services/booking.services');

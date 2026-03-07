@@ -153,7 +153,7 @@ app.use('/api/v1/fleet', fleetRoutes);
 app.use('/api/v1/pricing', require('./routes/pricing.routes'));
 
 // ─── HEALTH CHECK ─────────────────────────────────────────────────────────────
-const prisma = require('./config/prisma');
+const { prisma } = require('./config/prisma');
 const { reconnectPrisma } = require('./config/prisma');
 
 app.get('/health', async (req, res) => {

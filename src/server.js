@@ -5,8 +5,7 @@ require('dotenv').config({ path: path.resolve(__dirname, '../.env'), override: t
 // We previously forced port 5432 on Render, but logs show 5432 is failing 
 // while 6543 (Transaction Mode) handled 100+ concurrent requests successfully.
 const app = require('./app');
-const prisma = require('./config/prisma');
-const { warmupDatabase } = require('./config/prisma');
+const { prisma, warmupDatabase } = require('./config/prisma');
 const cache = require('./utils/cache');
 
 const PORT = process.env.PORT || 5050;
