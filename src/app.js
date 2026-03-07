@@ -152,13 +152,6 @@ app.use('/api/v1/b2b', b2bRoutes);
 app.use('/api/v1/fleet', fleetRoutes);
 app.use('/api/v1/pricing', require('./routes/pricing.routes'));
 
-// ─── PING (For Cron Jobs) ───────────────────────────────────────────────────
-// A lightweight route that DOES NOT query the database. Use this for cron-job.org
-// so we keep the Render server awake without exhausting Supabase connections.
-app.get('/ping', (req, res) => {
-  return res.status(200).json({ ok: true, message: 'Server is awake', timestamp: new Date().toISOString() });
-});
-
 // ─── HEALTH CHECK ─────────────────────────────────────────────────────────────
 // Render pings this every 30s. We do a lightweight DB ping so Render marks the
 // service as unhealthy if the DB connection pool is dead.
