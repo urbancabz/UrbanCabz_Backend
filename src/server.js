@@ -66,6 +66,15 @@ warmupDatabase()
             preloadCaches().catch(err => {
                 console.warn('⚠️ Background cache preload failed:', err.message);
             });
+
+            // Keep-alive mechanism to prevent Render from sleeping (free tier sleeps after 15 mins)
+            setInterval(() => {
+                const url = process.env.RENDER_EXTERNAL_URL || 'https://urbancabz-backend.onrender.com';
+                console.log(`PINGING self at ${url}/health to prevent sleep...`);
+                fetch(`${url}/health`)
+                    .then(res => console.log(`Keep-alive ping successful: ${res.status}`))
+                    .catch(err => console.error(`Keep-alive ping failed:`, err.message));
+            }, 14 * 60 * 1000); // 14 minutes
         });
     })
     .catch(err => {
