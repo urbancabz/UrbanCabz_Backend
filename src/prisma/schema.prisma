@@ -341,6 +341,7 @@ model fleet_vehicle {
   name              String
   seats             Int
   base_price_per_km Float    @default(13.0)
+  base_price_airport Float    @default(1500.0)
   category          String   // e.g. "Sedan", "SUV", "Luxury"
   description       String?
   image_url         String?

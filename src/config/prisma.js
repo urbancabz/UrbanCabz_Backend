@@ -2,12 +2,17 @@ const { PrismaClient } = require('@prisma/client');
 
 /**
  * Ensures the DATABASE_URL has the necessary parameters for Supabase/Prisma.
+ * Forcefully sets connection_limit=3 to avoid P2024 on Supabase Free Tier.
  */
 function buildPrismaUrl(url) {
     if (!url) return url;
     let newUrl = url.trim();
     
-    // Base parameters for Supabase stability
+    // 1. Remove any existing connection_limit or pool_timeout to force our stable values
+    newUrl = newUrl.replace(/([?&])connection_limit=\d+/g, '');
+    newUrl = newUrl.replace(/([?&])pool_timeout=\d+/g, '');
+    
+    // 2. Add stable parameters
     const params = [];
     if (newUrl.includes(':6543') && !newUrl.includes('pgbouncer=true')) {
         params.push('pgbouncer=true');
@@ -16,18 +21,16 @@ function buildPrismaUrl(url) {
         params.push('sslmode=require');
     }
     
-    // CRITICAL: Lower connection limit for Supabase Free Tier (Max 10 total)
-    // We use 3 to leave room for migrations, dashboard, and Render zero-downtime deploys.
-    if (!newUrl.includes('connection_limit=')) {
-        params.push('connection_limit=3');
-    }
-    if (!newUrl.includes('pool_timeout=')) {
-        params.push('pool_timeout=60'); // 60 seconds wait instead of 10
-    }
+    // Force these values regardless of what's in the environment string
+    params.push('connection_limit=3');
+    params.push('pool_timeout=60'); 
     
-    if (params.length > 0) {
-        newUrl += (newUrl.includes('?') ? '&' : '?') + params.join('&');
-    }
+    // 3. Clean up the URL and append params
+    newUrl = newUrl.replace(/[?&]$/, ''); // Remove trailing ? or &
+    newUrl += (newUrl.includes('?') ? '&' : '?') + params.join('&');
+    
+    // Remove double && if any were created
+    newUrl = newUrl.replace(/&&+/g, '&');
     
     return newUrl;
 }

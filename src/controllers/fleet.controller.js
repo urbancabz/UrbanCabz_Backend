@@ -54,8 +54,7 @@ const getFleetVehicle = async (req, res) => {
 const createFleetVehicle = async (req, res) => {
     try {
         const {
-            name, seats, base_price_per_km, category, description, image_url, is_active,
-            min_km_threshold, min_km_airport_apply, min_km_oneway_apply, min_km_roundtrip_apply
+            name, seats, base_price_per_km, base_price_airport, category, description, image_url, is_active
         } = req.body;
 
         if (!name || !seats || !base_price_per_km || !category) {
@@ -67,6 +66,7 @@ const createFleetVehicle = async (req, res) => {
                 name,
                 seats: parseInt(seats),
                 base_price_per_km: parseFloat(base_price_per_km),
+                base_price_airport: parseFloat(base_price_airport || 0),
                 category,
                 description: description || null,
                 image_url: image_url || null,
@@ -104,8 +104,7 @@ const updateFleetVehicle = async (req, res) => {
     try {
         const { id } = req.params;
         const {
-            name, seats, base_price_per_km, category, description, image_url, is_active,
-            min_km_threshold, min_km_airport_apply, min_km_oneway_apply, min_km_roundtrip_apply
+            name, seats, base_price_per_km, base_price_airport, category, description, image_url, is_active
         } = req.body;
 
         const existing = await prisma.fleet_vehicle.findUnique({ where: { id: parseInt(id) } });
@@ -119,6 +118,7 @@ const updateFleetVehicle = async (req, res) => {
                 ...(name && { name }),
                 ...(seats && { seats: parseInt(seats) }),
                 ...(base_price_per_km && { base_price_per_km: parseFloat(base_price_per_km) }),
+                ...(base_price_airport !== undefined && { base_price_airport: parseFloat(base_price_airport) }),
                 ...(category && { category }),
                 ...(description !== undefined && { description }),
                 ...(image_url !== undefined && { image_url }),
