@@ -147,19 +147,46 @@ const prismaClientSingleton = () => {
 };
 
 globalThis.prismaGlobal = globalThis.prismaGlobal ?? prismaClientSingleton();
-const prisma = globalThis.prismaGlobal;
+let prisma = globalThis.prismaGlobal; // Use let so we can recreate it
+
+let isReconnecting = false; // prevents multiple simultaneous reconnects
 
 /**
  * Force Prisma to close the connection pool and discard stale connections.
- * Prisma will automatically spin up a fresh pool on the next query.
+ * Waits 15 seconds to allow Supabase to fully wake up before recreating.
  */
 const reconnectPrisma = async () => {
-    console.warn('🔄 Reconnecting Prisma Client (clearing stale pool)...');
-    try {
-        await prisma.$disconnect();
-    } catch (e) {
-        console.warn('⚠️ Disconnect non-fatal error:', e.message);
+    if (isReconnecting) {
+        console.log('⏳ Reconnect already in progress, waiting 15s...');
+        await new Promise(r => setTimeout(r, 15000));
+        return prisma;
     }
+
+    isReconnecting = true;
+    console.warn('🔄 Reconnecting Prisma Client (clearing stale pool)...');
+    try { await prisma.$disconnect(); } catch (e) { }
+
+    // Wait 15s for Supabase to fully wake up (Singapore → Mumbai latency)
+    console.log('⏳ Waiting 15s for Supabase to wake up...');
+    await new Promise(r => setTimeout(r, 15000));
+
+    prisma = prismaClientSingleton();
+    globalThis.prismaGlobal = prisma;
+
+    for (let i = 0; i < 5; i++) {
+        try {
+            await prisma.$queryRaw`SELECT 1`;
+            console.log('✅ Prisma reconnected successfully!');
+            isReconnecting = false;
+            return prisma;
+        } catch (err) {
+            console.warn(`⏳ DB not ready yet... (${i + 1}/5)`);
+            await new Promise(r => setTimeout(r, 5000 * (i + 1)));
+        }
+    }
+
+    isReconnecting = false;
+    throw new Error('❌ Could not reconnect to Supabase after multiple attempts');
 };
 
 // ─── ROBUST QUERY WRAPPER ───────────────────────────────────────────────────
@@ -168,32 +195,31 @@ const reconnectPrisma = async () => {
  * Use this for critical operations like registration and booking.
  */
 const withRetry = async (fn, maxRetries = 5) => {
-    let lastError;
-    for (let i = 0; i < maxRetries; i++) {
+    for (let i = 1; i <= maxRetries; i++) {
         try {
-            return await fn();
+            // we pass current `prisma` to `fn` just in case, though the proxy handles it too
+            return await fn(prisma);
         } catch (err) {
-            lastError = err;
-            const isP1001 = err.code === 'P1001' || err.code === 'P1002';
-            const isTransient = isP1001 || err.code === 'P2024' || err.code === 'P1008';
-            if (!isTransient || i === maxRetries - 1) {
-                if (isTransient) {
-                    console.error(`❌ Prisma transient error ${err.code} exhausted all ${maxRetries} retries.`);
+            const isConnError =
+                err.code === 'P1001' ||
+                err.code === 'P1002' ||
+                err.message?.includes("Can't reach database") ||
+                err.message?.includes("connection pool") ||
+                err.code === 'P2024' ||
+                err.code === 'P1008';
+
+            if (!isConnError || i === maxRetries) {
+                if (isConnError) {
+                    console.error(`❌ Prisma transient error ${err.code || 'unknown'} exhausted all ${maxRetries} retries.`);
                 }
                 throw err;
             }
 
-            if (isP1001 || err.code === 'P2024') {
-                await reconnectPrisma();
-            }
-
-            // Exponential backoff starting at 5 seconds
-            const delay = Math.pow(2, i) * 5000;
-            console.warn(`⚠️ Prisma error ${err.code}. Retrying in ${delay}ms... (Attempt ${i + 1}/${maxRetries})`);
-            await new Promise(r => setTimeout(r, delay));
+            console.warn(`⚠️ DB error attempt ${i}/${maxRetries} (Code: ${err.code || 'Unknown'})`);
+            // Attempt to recover the connection pool, then loop again
+            await reconnectPrisma();
         }
     }
-    throw lastError;
 };
 
 /**
@@ -219,22 +245,25 @@ const warmupDatabase = async (maxAttempts = 5, delayMs = 5000) => {
  * Automatically wraps ALL database calls (.findUnique, .create, etc.) with
  * the withRetry logic so we don't need to manually rewrite 70+ controller lines.
  */
-const proxiedPrisma = new Proxy(prisma, {
+const proxiedPrisma = new Proxy({}, {
     get(target, prop) {
+        // ALWAYS dereference the fresh dynamically recreated prisma instance
+        const currentPrisma = prisma;
+
         // Skip private or un-proxyable Prisma fields
         if (prop.startsWith('_') || prop === 'then' || prop === 'catch') {
-            return Reflect.get(target, prop);
+            return Reflect.get(currentPrisma, prop);
         }
 
         // If it's a top-level command like $queryRaw or $transaction, wrap it
-        if (prop.startsWith('$') && prop !== '$disconnect' && prop !== '$connect' && typeof target[prop] === 'function') {
+        if (prop.startsWith('$') && prop !== '$disconnect' && prop !== '$connect' && typeof currentPrisma[prop] === 'function') {
             return async (...args) => {
-                return await withRetry(() => target[prop](...args));
+                return await withRetry(() => currentPrisma[prop](...args));
             };
         }
 
         // Get the model (e.g. prisma.user)
-        const model = Reflect.get(target, prop);
+        const model = Reflect.get(currentPrisma, prop);
         if (!model || typeof model !== 'object') return model;
 
         // Proxy the model's methods (e.g. prisma.user.findMany)
