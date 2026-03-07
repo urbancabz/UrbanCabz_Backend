@@ -7,11 +7,12 @@ const { PrismaClient } = require('@prisma/client');
 function buildPrismaUrl(url) {
     if (!url) return url;
     let newUrl = url.trim();
-    
-    // 1. Remove any existing connection_limit or pool_timeout to force our stable values
+
+    // 1. Remove any existing connection parameters to force our stable values
     newUrl = newUrl.replace(/([?&])connection_limit=\d+/g, '');
     newUrl = newUrl.replace(/([?&])pool_timeout=\d+/g, '');
-    
+    newUrl = newUrl.replace(/([?&])connect_timeout=\d+/g, '');
+
     // 2. Add stable parameters
     const params = [];
     if (newUrl.includes(':6543') && !newUrl.includes('pgbouncer=true')) {
@@ -20,18 +21,23 @@ function buildPrismaUrl(url) {
     if (!newUrl.includes('sslmode=')) {
         params.push('sslmode=require');
     }
-    
-    // Force these values regardless of what's in the environment string
-    params.push('connection_limit=3');
-    params.push('pool_timeout=60'); 
-    
+
+    // Optimization for Render -> Singapore Supabase
+    params.push('connection_limit=10'); // Increase from 3 to 10 for more headroom
+    params.push('pool_timeout=40');     // Wait up to 40s for a connection from the pool
+    params.push('connect_timeout=30');  // Wait up to 30s for the initial handshake
+
     // 3. Clean up the URL and append params
     newUrl = newUrl.replace(/[?&]$/, ''); // Remove trailing ? or &
     newUrl += (newUrl.includes('?') ? '&' : '?') + params.join('&');
-    
+
     // Remove double && if any were created
     newUrl = newUrl.replace(/&&+/g, '&');
-    
+
+    // Log obfuscated URL for debugging
+    const obfuscated = newUrl.replace(/:([^@]+)@/, ':****@');
+    console.log(`📡 Prisma configured with URL: ${obfuscated}`);
+
     return newUrl;
 }
 
@@ -58,11 +64,11 @@ const warmupDatabase = async (maxAttempts = 10, delayMs = 5000) => {
             return;
         } catch (err) {
             console.warn(`⚠️ DB Warm-up attempt ${attempt}/${maxAttempts} failed: ${err.message}`);
-            
+
             // Helpful diagnostics for local developers
             if (err.message.includes('Can\'t reach database server')) {
                 console.error('\n❌ LOCAL CONNECTIVITY ERROR DETECTED:');
-                
+
                 if (process.env.DATABASE_URL && process.env.DATABASE_URL.includes(':5432')) {
                     console.error('⚠️  YOUR DATABASE_URL IS USING PORT 5432 (Session Pooler).');
                     console.error('⚠️  Prisma works most reliably with the Transaction Pooler (Port 6543).');
