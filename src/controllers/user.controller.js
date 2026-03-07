@@ -162,8 +162,11 @@ const getUserBookings = async (req, res) => {
         const limitNum = parseInt(limit);
         const skip = (pageNum - 1) * limitNum;
 
+        console.log(`[getUserBookings] Request for UserID: ${userId} (Page: ${pageNum}, Limit: ${limitNum})`);
+
         // Stats: Total spent & Total rides
         const totalRides = await prisma.booking.count({ where: { user_id: userId } });
+        console.log(`[getUserBookings] Total Rides Count: ${totalRides}`);
 
         const totalSpentAggregate = await prisma.booking.aggregate({
             where: {
@@ -174,6 +177,7 @@ const getUserBookings = async (req, res) => {
                 total_amount: true
             }
         });
+        console.log(`[getUserBookings] Total Spent Aggregate:`, totalSpentAggregate._sum);
 
         // Fetch paginated bookings
         const bookings = await prisma.booking.findMany({
@@ -186,6 +190,7 @@ const getUserBookings = async (req, res) => {
                 assign_taxis: true
             }
         });
+        console.log(`[getUserBookings] Bookings fetched on this page: ${bookings.length}`);
 
         res.json({
             success: true,

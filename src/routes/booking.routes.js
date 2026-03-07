@@ -15,18 +15,6 @@ router.get('/my', requireAuth, bookingController.getMyBookings);
 // GET /api/v1/bookings/company
 router.get('/company', requireAuth, bookingController.getCompanyBookings);
 
-// POST /api/v1/bookings/create - Direct booking bypassing Razorpay payment
-router.post(
-    '/create',
-    requireAuth,
-    [
-        body('pickupLocation').notEmpty().withMessage('Pickup location is required'),
-        body('dropLocation').notEmpty().withMessage('Drop location is required'),
-        body('totalAmount').isNumeric().withMessage('Total amount must be a number')
-    ],
-    bookingController.createDirectBooking
-);
-
 module.exports = router;
 
 

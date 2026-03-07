@@ -107,16 +107,16 @@ async function verifyPhone({ userId, otp, verificationId }) {
     }
 
     // Success: Mark OTP as verified AND User as verified
-    await prisma.$transaction(async (tx) => {
-        await tx.passwordResetOtp.update({
+    await prisma.$transaction([
+        prisma.passwordResetOtp.update({
             where: { id: record.id },
             data: { verified: true, attempts: { increment: 1 } },
-        });
-        await tx.user.update({
+        }),
+        prisma.user.update({
             where: { id: userId },
             data: { is_verified: true },
-        });
-    });
+        }),
+    ]);
 
     return { success: true, message: 'Phone verified successfully' };
 }

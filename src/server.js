@@ -1,6 +1,5 @@
 const path = require('path');
-require('dotenv').config({ path: path.resolve(__dirname, '../.env'), override: true });
-
+require('dotenv').config({ path: path.resolve(__dirname, '../.env') });
 const app = require('./app');
 const prisma = require('./config/prisma');
 const { warmupDatabase } = require('./config/prisma');
@@ -8,21 +7,27 @@ const cache = require('./utils/cache');
 
 const PORT = process.env.PORT || 5050;
 
+// ═══════════════════════════════════════════════════════════════
+// STARTUP CACHE PRELOAD: Load heavy data into cache so the first
+// user request always hits cache and never hammers DB.
+// Queries are sequential with staggered delays to prevent
+// connection burst during cold start.
+// ═══════════════════════════════════════════════════════════════
 async function preloadCaches() {
-    // Each query runs strictly one at a time with a 2s gap — avoids pool exhaustion
-    // on Supabase free tier (connection_limit=3)
-    const delay = (ms) => new Promise(r => setTimeout(r, ms));
     try {
         console.log('⏳ Preloading caches...');
 
-        await delay(2000); // let warmup connection settle
+        // Pricing settings — cached for 30 minutes (matches PRICING_CACHE_TTL in controller)
         const pricing = await prisma.pricing_settings.findFirst();
         if (pricing) {
             cache.set('pricing_settings', pricing, 30 * 60);
             console.log('  ✅ Pricing cache loaded');
         }
 
-        await delay(2000);
+        // Stagger queries to avoid connection burst on startup
+        await new Promise(r => setTimeout(r, 500));
+
+        // Active fleet — cached for 2 minutes
         const fleet = await prisma.fleet_vehicle.findMany({
             where: { is_active: true },
             orderBy: { category: 'asc' }
@@ -30,7 +35,9 @@ async function preloadCaches() {
         cache.set('fleet_vehicles_true', fleet, 120);
         console.log(`  ✅ Active fleet cache loaded (${fleet.length} vehicles)`);
 
-        await delay(2000);
+        await new Promise(r => setTimeout(r, 500));
+
+        // All fleet vehicles — cached for 2 minutes
         const allFleet = await prisma.fleet_vehicle.findMany({ orderBy: { category: 'asc' } });
         cache.set('fleet_vehicles_all', allFleet, 120);
         console.log(`  ✅ All fleet cache loaded (${allFleet.length} vehicles)`);
@@ -41,41 +48,28 @@ async function preloadCaches() {
     }
 }
 
-console.log('🚀 Starting server initialization...');
+// ═══════════════════════════════════════════════════════════════
+// WARM-UP: Establish a DB connection BEFORE accepting any traffic.
+// On Render free tier, Supabase's pooler can take 10-30 seconds
+// to wake up. If we accept requests before the pool is ready,
+// every single request queues against the pool simultaneously
+// and they ALL timeout at 20 seconds, crashing the server.
+// ═══════════════════════════════════════════════════════════════
+async function startServer() {
+    console.log('⏳ Warming up database connection...');
 
-// ── Bind port FIRST so Render never kills us for being slow to listen ──────
-app.listen(PORT, () => {
-    console.log(`Server listening on ${PORT}`);
-
-    // Keep-alive ping every 14 min so Render free tier never sleeps
-    setInterval(() => {
-        const url = process.env.RENDER_EXTERNAL_URL || 'https://urbancabz-backend.onrender.com';
-        fetch(`${url}/health`)
-            .then(res => console.log(`Keep-alive ping: ${res.status}`))
-            .catch(err => console.error(`Keep-alive ping failed:`, err.message));
-    }, 14 * 60 * 1000);
-});
-
-// ── Warmup + cache preload in background — does NOT block the port ─────────
-warmupDatabase()
-    .then(() => preloadCaches())
-    .catch(err => {
-        // Not fatal — requests still work, cache loads on first hit
-        console.warn('⚠️ Background warmup failed:', err.message);
-    });
-
-// ─── GRACEFUL SHUTDOWN ──────────────────────────────────────────────────────
-const gracefulShutdown = async (signal) => {
-    console.log(`\n🛑 ${signal} received. Closing database connections gracefully...`);
     try {
-        await prisma.$disconnect();
-        console.log('✅ Prisma disconnected successfully.');
-        process.exit(0);
-    } catch (err) {
-        console.error('❌ Error during database disconnect:', err.message);
-        process.exit(1);
-    }
-};
+        await warmupDatabase();
+        console.log('✅ Database connection established.');
 
-process.on('SIGINT', () => gracefulShutdown('SIGINT'));
-process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+        // Preload caches AFTER warmup completes
+        await preloadCaches();
+    } catch (err) {
+        console.error('❌ Could not connect to database during startup. Starting server anyway...');
+        console.error(err.message);
+    }
+
+    app.listen(PORT, () => console.log(`Server listening on ${PORT}`));
+}
+
+startServer();

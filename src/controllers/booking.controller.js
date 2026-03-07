@@ -42,78 +42,9 @@ async function getCompanyBookings(req, res) {
   }
 }
 
-async function createDirectBooking(req, res) {
-  try {
-    const userId = req.user.id;
-    const {
-      pickupLocation,
-      dropLocation,
-      scheduledAt,
-      distanceKm,
-      estimatedFare,
-      totalAmount,
-      carModel
-    } = req.body;
-
-    console.log(`[Booking] Creating direct booking for user ${userId}, totalAmount: ${totalAmount}`);
-
-    const booking = await bookingService.createDirectBooking({
-      userId,
-      pickupLocation,
-      dropLocation,
-      scheduledAt,
-      distanceKm,
-      estimatedFare,
-      totalAmount,
-      carModel
-    });
-
-    console.log(`[Booking] Direct booking created with ID: ${booking.id}`);
-
-    // Fire-and-forget notifications (WhatsApp + Email)
-    try {
-      const emailService = require('../services/email.service');
-      const { sendBookingConfirmationWhatsApp } = require('../services/twilio.service');
-
-      const user = booking.user;
-
-      // Email Confirmation
-      if (user && user.email) {
-        emailService.sendBookingConfirmation(booking, user)
-          .catch(err => console.error('Failed to send booking email:', err));
-      }
-
-      // WhatsApp Confirmation
-      const userPhone = user?.phone;
-      if (userPhone) {
-        sendBookingConfirmationWhatsApp({
-          toPhone: userPhone,
-          booking,
-        }).catch(err => console.error('Failed to send WhatsApp:', err));
-      } else {
-        console.warn('Booking user has no phone number; skipping WhatsApp confirmation.');
-      }
-    } catch (notifyErr) {
-      console.error('Error scheduling notifications:', notifyErr);
-    }
-
-    return res.status(201).json({
-      message: 'Booking confirmed successfully',
-      booking
-    });
-
-  } catch (err) {
-    console.error('[Booking] Error creating direct booking:', err);
-    const status = err.status || 500;
-    const message = err.message || 'Internal server error';
-    return res.status(status).json({ message });
-  }
-}
-
 module.exports = {
   getMyBookings,
-  getCompanyBookings,
-  createDirectBooking
+  getCompanyBookings
 };
 
 

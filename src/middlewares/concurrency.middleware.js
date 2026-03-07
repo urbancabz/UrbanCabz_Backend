@@ -8,11 +8,8 @@
  * MAX_CONCURRENT must be LESS than the Prisma connection_limit (8)
  * to leave room for heartbeat + system queries.
  */
-// Pool is 3 (set in DATABASE_URL connection_limit=3, Supabase free tier).
-// We cap at 2 to leave 1 slot free for Prisma internals, warmup, and health checks.
-// This prevents P2024 "connection pool exhausted" under burst traffic.
-const MAX_CONCURRENT = 2;
-const MAX_QUEUE = 100; // Queue up to 100 waiting requests before returning 503
+const MAX_CONCURRENT = 6; // Pool is 8 — leave 2 slots for startup/system queries
+const MAX_QUEUE = 50;     // Don't queue more than 50 requests
 
 let activeCount = 0;
 const queue = [];
