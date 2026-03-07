@@ -4,12 +4,24 @@ const { PrismaClient } = require('@prisma/client');
 
 // Ensure the connection string forces long timeouts so Render has time to wake Supabase
 const getOptimizedUrl = () => {
-    let url = process.env.DATABASE_URL || '';
-    if (url && !url.includes('connect_timeout')) {
-        url += url.includes('?') ? '&' : '?';
-        url += 'connect_timeout=60&pool_timeout=60&socket_timeout=60';
+    let rawUrl = process.env.DATABASE_URL;
+    if (!rawUrl) return undefined;
+
+    try {
+        const url = new URL(rawUrl);
+        url.searchParams.set('connect_timeout', '60');
+        url.searchParams.set('pool_timeout', '60');
+        url.searchParams.set('socket_timeout', '60');
+        url.searchParams.set('connection_limit', '3'); // User requested max 3 connections for pool
+        return url.toString();
+    } catch {
+        // Fallback to simple append if URL parsing fails
+        if (!rawUrl.includes('connect_timeout')) {
+            rawUrl += rawUrl.includes('?') ? '&' : '?';
+            rawUrl += 'connect_timeout=60&pool_timeout=60&socket_timeout=60&connection_limit=3';
+        }
+        return rawUrl;
     }
-    return url;
 };
 
 const createPrismaClient = () => {
