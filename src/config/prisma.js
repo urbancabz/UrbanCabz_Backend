@@ -137,14 +137,24 @@ function buildPrismaUrl() {
 
 const prismaUrl = buildPrismaUrl();
 
-const prisma = new PrismaClient({
-    log: ['error'],
-    datasources: {
-        db: {
-            url: prismaUrl,
-        }
+// ─── SINGLETON PRISMA CLIENT ───────────────────────────────────────────────
+let prisma;
+
+if (process.env.NODE_ENV === 'production') {
+    prisma = new PrismaClient({
+        log: ['error'],
+        datasources: { db: { url: prismaUrl } }
+    });
+} else {
+    // Preserve Prisma client in Node.js global object during hot reloads
+    if (!global.prisma) {
+        global.prisma = new PrismaClient({
+            log: ['error'],
+            datasources: { db: { url: prismaUrl } }
+        });
     }
-});
+    prisma = global.prisma;
+}
 
 // ─── ROBUST QUERY WRAPPER ───────────────────────────────────────────────────
 /**
@@ -158,12 +168,25 @@ const withRetry = async (fn, maxRetries = 3) => {
             return await fn();
         } catch (err) {
             lastError = err;
-            const isTransient = err.code === 'P1001' || err.code === 'P2024' || err.code === 'P1008';
+            const isP1001 = err.code === 'P1001';
+            const isTransient = isP1001 || err.code === 'P2024' || err.code === 'P1008';
             if (!isTransient || i === maxRetries - 1) {
                 if (isTransient) {
                     console.error(`❌ Prisma transient error ${err.code} exhausted all ${maxRetries} retries.`);
                 }
                 throw err;
+            }
+
+            // --- RECONNECT LOGIC ---
+            // If the connection drops while Render was sleeping, Prisma keeps a stale pool.
+            // Calling $disconnect() forces Prisma to close the stale connection and recreate it on the next query.
+            if (isP1001 || err.code === 'P2024') {
+                console.warn('⚠️ Stale or unreachable Prisma connection detected! Attempting to force disconnect so Prisma reconnects cleanly...');
+                try {
+                    await prisma.$disconnect();
+                } catch (e) {
+                    // Ignore disconnect errors as the connection is already dead
+                }
             }
 
             const delay = Math.pow(2, i) * 1000; // Increased base delay to 1s
