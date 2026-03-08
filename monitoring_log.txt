@@ -1,18 +1,18 @@
-Monitoring started at 2026-03-07T05:40:50.917Z
-[2026-03-07T05:40:52.274Z] Status: 200 | Body: OK
-[2026-03-07T05:41:54.387Z] Status: 200 | Body: OK
-[2026-03-07T05:42:54.419Z] Status: 200 | Body: OK
-[2026-03-07T05:43:52.288Z] Status: 200 | Body: OK
-[2026-03-07T05:44:52.419Z] Status: 200 | Body: OK
-[2026-03-07T05:45:52.276Z] Status: 200 | Body: OK
-[2026-03-07T05:46:54.448Z] Status: 200 | Body: OK
-[2026-03-07T05:47:52.299Z] Status: 200 | Body: OK
-[2026-03-07T05:48:52.314Z] Status: 200 | Body: OK
-[2026-03-07T05:49:51.331Z] Status: 200 | Body: OK
-[2026-03-07T05:50:52.467Z] Status: 200 | Body: OK
-[2026-03-07T05:51:54.477Z] Status: 200 | Body: OK
-[2026-03-07T05:52:51.320Z] Status: 200 | Body: OK
-[2026-03-07T05:53:52.349Z] Status: 200 | Body: OK
-[2026-03-07T05:54:52.502Z] Status: 200 | Body: OK
+Monitoring started at 2026-03-07T09:53:42.194Z
+[2026-03-07T09:53:43.941Z] Status: 200 | Body: {"ok":true,"database":"connected","timestamp":"2026-03-07T09:53:44.308Z"}
+[2026-03-07T09:54:43.533Z] Status: 200 | Body: {"ok":true,"database":"connected","timestamp":"2026-03-07T09:54:43.890Z"}
+[2026-03-07T09:55:43.641Z] Status: 200 | Body: {"ok":true,"database":"connected","timestamp":"2026-03-07T09:55:44.013Z"}
+[2026-03-07T09:56:43.500Z] Status: 200 | Body: {"ok":true,"database":"connected","timestamp":"2026-03-07T09:56:43.879Z"}
+[2026-03-07T09:57:42.675Z] Status: 200 | Body: {"ok":true,"database":"connected","timestamp":"2026-03-07T09:57:43.045Z"}
+[2026-03-07T09:58:43.643Z] Status: 200 | Body: {"ok":true,"database":"connected","timestamp":"2026-03-07T09:58:44.024Z"}
+[2026-03-07T09:59:42.722Z] Status: 200 | Body: {"ok":true,"database":"connected","timestamp":"2026-03-07T09:59:43.079Z"}
+[2026-03-07T10:00:42.743Z] Status: 200 | Body: {"ok":true,"database":"connected","timestamp":"2026-03-07T10:00:43.098Z"}
+[2026-03-07T10:01:45.640Z] Status: 200 | Body: {"ok":true,"database":"connected","timestamp":"2026-03-07T10:01:46.018Z"}
+[2026-03-07T10:02:43.707Z] Status: 200 | Body: {"ok":true,"database":"connected","timestamp":"2026-03-07T10:02:44.085Z"}
+[2026-03-07T10:03:43.756Z] Status: 200 | Body: {"ok":true,"database":"connected","timestamp":"2026-03-07T10:03:44.123Z"}
+[2026-03-07T10:04:43.668Z] Status: 200 | Body: {"ok":true,"database":"connected","timestamp":"2026-03-07T10:04:44.019Z"}
+[2026-03-07T10:05:42.613Z] Status: 200 | Body: {"ok":true,"database":"connected","timestamp":"2026-03-07T10:05:42.993Z"}
+[2026-03-07T10:06:42.751Z] Status: 200 | Body: {"ok":true,"database":"connected","timestamp":"2026-03-07T10:06:43.131Z"}
+[2026-03-07T10:07:42.673Z] Status: 200 | Body: {"ok":true,"database":"connected","timestamp":"2026-03-07T10:07:43.047Z"}
 
 ✅ 15 minutes elapsed. Website is stable! Stopping monitor.
