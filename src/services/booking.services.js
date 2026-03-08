@@ -57,6 +57,66 @@ async function createBookingAfterPayment({
 }
 
 /**
+ * Create a direct/cash booking (Payment happens later)
+ */
+async function createDirectBooking({
+  userId,
+  pickupLocation,
+  dropLocation,
+  scheduledAt,
+  distanceKm,
+  estimatedFare,
+  totalAmount,
+  carModel,
+  passengerDetails
+}) {
+  if (!userId) throw { status: 400, message: 'userId is required' };
+  if (!pickupLocation || !dropLocation) {
+    throw { status: 400, message: 'pickupLocation and dropLocation are required' };
+  }
+  if (totalAmount === undefined || totalAmount === null) {
+    throw { status: 400, message: 'totalAmount is required' };
+  }
+
+  // Add notes from passenger details if provided (like remarks, external name/phone if booking for someone else)
+  let remarks = "";
+  if (passengerDetails) {
+    if (passengerDetails.remarks) remarks += `Remarks: ${passengerDetails.remarks}\n`;
+    if (passengerDetails.name) remarks += `Passenger Name: ${passengerDetails.name}\n`;
+    if (passengerDetails.phone) remarks += `Passenger Phone: ${passengerDetails.phone}\n`;
+  }
+
+  // Use a transaction if we want to add to booking_note as well, but for now we omit extra notes table and just create payment
+  const booking = await prisma.booking.create({
+    data: {
+      user_id: userId,
+      pickup_location: pickupLocation,
+      drop_location: dropLocation,
+      scheduled_at: scheduledAt || null,
+      distance_km: distanceKm || null,
+      estimated_fare: estimatedFare || null,
+      total_amount: totalAmount,
+      car_model: carModel || null, // Save car model
+      status: 'PENDING_PAYMENT', // It's a cash booking, payment is pending
+      payments: {
+        create: {
+          amount: totalAmount,
+          currency: 'INR',
+          status: 'PENDING',
+          provider: 'cash',
+          remaining_amount: totalAmount
+        }
+      }
+    },
+    include: {
+      payments: true
+    }
+  });
+
+  return booking;
+}
+
+/**
  * Create booking with PENDING_PAYMENT status and payment with PENDING status
  * Called when Razorpay order is created (before payment)
  */
@@ -214,6 +274,7 @@ async function getCompanyBookings(companyId) {
 }
 
 module.exports = {
+  createDirectBooking,
   createBookingAfterPayment,
   createBookingWithPendingPayment,
   updateBookingAfterPaymentSuccess,

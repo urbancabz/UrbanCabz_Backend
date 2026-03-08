@@ -2,6 +2,48 @@
 const { validationResult } = require('express-validator');
 const bookingService = require('../services/booking.services');
 
+/**
+ * Handle direct booking creation (cash to driver)
+ */
+async function createDirectBooking(req, res) {
+  try {
+    const userId = req.user.id;
+    const {
+      pickupLocation,
+      dropLocation,
+      scheduledAt,
+      distanceKm,
+      estimatedFare,
+      totalAmount,
+      carModel,
+      passengerDetails
+    } = req.body;
+
+    if (!pickupLocation || !dropLocation || totalAmount === undefined) {
+      return res.status(400).json({ success: false, message: 'Missing required fields' });
+    }
+
+    const booking = await bookingService.createDirectBooking({
+      userId,
+      pickupLocation,
+      dropLocation,
+      scheduledAt,
+      distanceKm,
+      estimatedFare,
+      totalAmount,
+      carModel,
+      passengerDetails
+    });
+
+    return res.status(201).json({ success: true, booking });
+  } catch (err) {
+    console.error('[createDirectBooking error]', err);
+    const status = err.status || 500;
+    const message = err.message || 'Internal server error';
+    return res.status(status).json({ success: false, message });
+  }
+}
+
 // This endpoint assumes payment is already successful.
 // In real-life you'll usually call this from a payment webhook or
 // from your frontend right after receiving a "payment success" event.
@@ -43,6 +85,7 @@ async function getCompanyBookings(req, res) {
 }
 
 module.exports = {
+  createDirectBooking,
   getMyBookings,
   getCompanyBookings
 };

@@ -76,11 +76,11 @@ async function requestPasswordReset(req, res) {
     const errors = validationResult(req);
     if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
-    const { email, phone } = req.body;
-    console.log('🔔 requestPasswordReset called with:', { email, phone });
-    const result = await passwordResetService.requestPasswordReset({ email, phone });
+    const { email, phone, otpTo } = req.body;
+    console.log('🔔 requestPasswordReset called with:', { email, phone, otpTo });
+    const result = await passwordResetService.requestPasswordReset({ email, phone, otpTo });
     return res.json({
-      message: 'OTP sent to your mobile number via SMS',
+      message: otpTo && String(otpTo).trim().includes('@') ? 'OTP sent to your email' : 'OTP sent to your mobile number via SMS',
       ...result,
     });
   } catch (err) {

@@ -9,6 +9,9 @@ const router = express.Router();
 // DEPRECATED: Standard flow is now payments/verify-and-book
 // router.post('/after-payment', ...);
 
+// POST /api/v1/bookings/create
+router.post('/create', requireAuth, bookingController.createDirectBooking);
+
 // GET /api/v1/bookings/my
 router.get('/my', requireAuth, bookingController.getMyBookings);
 

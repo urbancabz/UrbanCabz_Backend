@@ -2,6 +2,7 @@
 const bcrypt = require('bcryptjs');
 const prisma = require('../config/prisma');
 const { sendOtpSms } = require('./sms.service');
+const { sendEmail } = require('./email.service');
 
 const PASSWORD_SALT_ROUNDS = 10;
 const OTP_SALT_ROUNDS = 10;
@@ -44,46 +45,19 @@ function maskPhone(phone = '') {
   return `*******${visible}`;
 }
 
-async function requestPasswordReset({ email, phone }) {
-  if (!email && !phone) {
-    throw { status: 400, message: 'Email or phone is required' };
+async function requestPasswordReset({ email, otpTo }) {
+  if (!email) {
+    throw { status: 400, message: 'Registered email is required' };
   }
 
-  let user = null;
-
-  if (email) {
-    user = await prisma.user.findFirst({
-      where: { email: email.toLowerCase() },
-      select: { id: true, phone: true, email: true },
-    });
-  } else if (phone) {
-    const raw = String(phone).trim();
-    const digits = raw.replace(/\D/g, '');
-    const normalized = normalizeIndianPhone(raw);
-
-    user = await prisma.user.findFirst({
-      where: {
-        OR: [
-          { phone: raw },          // exactly what user typed
-          { phone: normalized },   // normalized Indian format
-          { phone: `+${digits}` }, // bare digits with +
-        ],
-      },
-      select: { id: true, phone: true, email: true },
-    });
-  }
+  const user = await prisma.user.findFirst({
+    where: { email: email.toLowerCase().trim() },
+    select: { id: true, phone: true, email: true },
+  });
 
   if (!user) {
-    throw { status: 404, message: 'User not found' };
+    throw { status: 404, message: 'No account found with this email' };
   }
-
-  if (!user.phone) {
-    throw { status: 400, message: 'No phone number on file for this user' };
-  }
-
-  console.log('🔔 Found user for password reset:', { id: user.id, phone: user.phone, email: user.email });
-  const normalizedPhone = normalizeIndianPhone(user.phone);
-  console.log('🔔 Normalized phone for SMS OTP:', normalizedPhone);
 
   const otp = generateOtp();
   const otpHash = await bcrypt.hash(otp, OTP_SALT_ROUNDS);
@@ -98,23 +72,46 @@ async function requestPasswordReset({ email, phone }) {
     select: { id: true, expires_at: true },
   });
 
-  console.log('🔔 Created PasswordResetOtp record:', {
-    resetId: resetRecord.id,
-    expiresAt: resetRecord.expires_at,
-    toPhone: normalizedPhone,
-  });
+  let destination = '';
 
-  await sendOtpSms({
-    toPhone: normalizedPhone,
-    otp,
-    expiryMinutes: OTP_TTL_MINUTES,
-  });
+  if (otpTo && String(otpTo).trim().includes('@')) {
+    // Send OTP via Email
+    const toEmail = String(otpTo).trim();
+    console.log('📧 Sending OTP via email to:', toEmail);
+    await sendEmail({
+      to: toEmail,
+      subject: 'Urban Cabz - Password Reset OTP',
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 500px; margin: 0 auto; color: #333;">
+          <h2 style="color: #EAB308;">Password Reset OTP</h2>
+          <p>Your OTP for resetting your Urban Cabz password is:</p>
+          <h1 style="letter-spacing: 8px; color: #111;">${otp}</h1>
+          <p>This OTP is valid for <strong>${OTP_TTL_MINUTES} minutes</strong>.</p>
+          <p>If you didn't request this, please ignore this email.</p>
+          <br/>
+          <p>Safe Travels,<br/>The Urban Cabz Team</p>
+        </div>
+      `,
+      text: `Your Urban Cabz password reset OTP is: ${otp}. Valid for ${OTP_TTL_MINUTES} minutes.`,
+    });
+    destination = toEmail;
+  } else {
+    // Send OTP via SMS
+    const rawPhone = otpTo ? String(otpTo).trim() : user.phone;
+    if (!rawPhone) {
+      throw { status: 400, message: 'No phone number on file. Please provide a phone number or email to receive OTP.' };
+    }
+    const sendToPhone = normalizeIndianPhone(rawPhone);
+    console.log('📱 Sending OTP via SMS to:', sendToPhone);
+    await sendOtpSms({ toPhone: sendToPhone, otp, expiryMinutes: OTP_TTL_MINUTES });
+    destination = maskPhone(sendToPhone);
+  }
 
   return {
     resetId: resetRecord.id,
     expiresAt: resetRecord.expires_at,
     expiresIn: OTP_TTL_MINUTES * 60,
-    destination: maskPhone(user.phone),
+    destination,
   };
 }
 
