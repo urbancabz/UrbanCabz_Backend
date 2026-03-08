@@ -74,9 +74,12 @@ async function register({ email, password, name, phone, roleName = 'customer' })
   return { user: toPublicUser(user, role.name), token };
 }
 
-async function login({ email, password }) {
-  const user = await prisma.user.findUnique({
-    where: { email },
+async function login({ email, password, isB2bPortal = false }) {
+  const user = await prisma.user.findFirst({
+    where: {
+      email,
+      ...(isB2bPortal ? { role: { name: 'b2b_user' } } : {})
+    },
     select: {
       id: true,
       email: true,
@@ -91,7 +94,10 @@ async function login({ email, password }) {
       }
     }
   });
-  if (!user) throw { status: 401, message: 'Invalid Email' };
+
+  if (!user) {
+    throw { status: 401, message: isB2bPortal ? 'Invalid credentials or not a B2B user' : 'Invalid Email' };
+  }
 
   if (!user.password_hash) throw { status: 401, message: 'No password set for this user' };
 
@@ -99,7 +105,7 @@ async function login({ email, password }) {
   if (!ok) throw { status: 401, message: 'Invalid Password' };
 
   // Prevent B2B users from logging in via the generic customer portal
-  if (user.role?.name === 'b2b_user') {
+  if (!isB2bPortal && user.role?.name === 'b2b_user') {
     throw { status: 403, message: 'Please use the B2B portal to login.' };
   }
 

@@ -116,34 +116,21 @@ async function b2bLogin(req, res) {
 
     const { email, password } = req.body;
 
-    // Get user and check if they exist
+    // Try logging in using the shared auth service with the B2B flag
+    const result = await authService.login({ email, password, isB2bPortal: true });
+
     const prisma = require('../config/prisma');
 
-    const user = await prisma.user.findUnique({
-      where: { email },
-      include: {
-        role: true
+    // Fetch user to check first login status
+    const user = await prisma.user.findFirst({
+      where: {
+        email,
+        role: { name: 'b2b_user' }
       }
     });
 
-    if (!user) {
-      return res.status(401).json({ message: 'Invalid credentials' });
-    }
-
-    // Check if user is B2B user
-    if (user.role?.name !== 'b2b_user') {
-      return res.status(403).json({ message: 'This login is for B2B users only' });
-    }
-
-    // Regular login flow (validate password first)
-    if (!password) {
-      return res.status(400).json({ message: 'Password is required' });
-    }
-
-    const result = await authService.login({ email, password });
-
     // If login successful, check if it's still marked as first login
-    if (user.is_first_login) {
+    if (user?.is_first_login) {
       return res.json({
         isFirstLogin: true,
         userId: user.id,
@@ -152,17 +139,7 @@ async function b2bLogin(req, res) {
       });
     }
 
-    // Find latest company info dynamically
-    const b2bUser = await prisma.b2b_user.findFirst({
-      where: { user_id: user.id },
-      include: { company: true }
-    });
-
-    // Add company info to response for normal login
-    return res.json({
-      ...result,
-      company: b2bUser?.company || null
-    });
+    return res.json(result);
 
   } catch (err) {
     console.error(err);
@@ -180,25 +157,17 @@ async function b2bSetPassword(req, res) {
     const { email, password } = req.body;
 
     const prisma = require('../config/prisma');
+    const bcrypt = require('bcryptjs');
 
-    const user = await prisma.user.findUnique({
-      where: { email },
-      include: {
-        role: true,
-        b2bUsers: {
-          include: {
-            company: true
-          }
-        }
+    const user = await prisma.user.findFirst({
+      where: {
+        email,
+        role: { name: 'b2b_user' }
       }
     });
 
     if (!user) {
-      return res.status(404).json({ message: 'User not found' });
-    }
-
-    if (user.role?.name !== 'b2b_user') {
-      return res.status(403).json({ message: 'Not a B2B user' });
+      return res.status(404).json({ message: 'User not found or not a B2B user' });
     }
 
     if (!user.is_first_login) {
@@ -216,13 +185,12 @@ async function b2bSetPassword(req, res) {
       }
     });
 
-    // Auto-login after setting password
-    const loginResult = await authService.login({ email, password });
+    // Auto-login after setting password using the shared auth service with the B2B flag
+    const loginResult = await authService.login({ email, password, isB2bPortal: true });
 
     return res.json({
       message: 'Password set successfully',
-      ...loginResult,
-      company: user.b2bUsers[0]?.company || null
+      ...loginResult
     });
 
   } catch (err) {
