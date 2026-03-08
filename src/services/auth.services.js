@@ -98,6 +98,12 @@ async function login({ email, password }) {
   const ok = await bcrypt.compare(password, user.password_hash);
   if (!ok) throw { status: 401, message: 'Invalid Password' };
 
+  // Prevent B2B users from logging in via the generic customer portal
+  if (user.role?.name === 'b2b_user') {
+    throw { status: 403, message: 'Please use the B2B portal to login.' };
+  }
+
+
   let companyId = null;
   if (user.role?.name === 'b2b_user') {
     const b2bUser = await prisma.b2b_user.findFirst({
