@@ -1,5 +1,6 @@
 // src/middlewares/auth.middleware.js
 const { verifyToken } = require('../utils/jwt');
+const cache = require('../utils/cache');
 
 async function requireAuth(req, res, next) {
   try {
@@ -14,13 +15,20 @@ async function requireAuth(req, res, next) {
     const payload = verifyToken(token);
 
     // Directly assign user from the verified JWT payload.
-    // This completely eliminates the need for a database lookup on every request,
-    // immediately cutting the connection pool pressure by 50%.
+    // This completely eliminates the need for a database lookup on every request.
     req.user = {
       id: payload.userId,
       role: payload.role || null,
       companyId: payload.companyId || null
     };
+
+    // FAST CACHE INTERCEPTION FOR DEACTIVATED B2B COMPANIES
+    if (req.user.companyId) {
+      const deactivatedSet = cache.get('deactivated_companies') || new Set();
+      if (deactivatedSet.has(req.user.companyId)) {
+        return res.status(401).json({ message: 'Account deactivated. Please contact support.' });
+      }
+    }
 
     return next();
   } catch (err) {
@@ -34,6 +42,7 @@ async function requireAuth(req, res, next) {
     return res.status(503).json({ message: 'Service temporarily unavailable. Please try again.' });
   }
 }
+
 
 function requireRole(roles = []) {
   return (req, res, next) => {

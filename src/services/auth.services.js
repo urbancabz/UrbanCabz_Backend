@@ -36,8 +36,16 @@ function toPublicUser(user, roleName) {
 
 async function register({ email, password, name, phone, roleName = 'customer' }) {
   // check existing
-  const existing = await prisma.user.findUnique({ where: { email } });
-  if (existing) throw { status: 409, message: 'Email already registered' };
+  const existing = await prisma.user.findUnique({
+    where: { email },
+    include: { role: true }
+  });
+  if (existing) {
+    if (existing.role?.name === 'b2b_user') {
+      throw { status: 409, message: 'This email is already registered as a B2B account. Please log in through the B2B portal.' };
+    }
+    throw { status: 409, message: 'Email already registered' };
+  }
 
   // find role
   let role = await prisma.role.findUnique({ where: { name: roleName } });
@@ -114,9 +122,20 @@ async function login({ email, password, isB2bPortal = false }) {
   if (user.role?.name === 'b2b_user') {
     const b2bUser = await prisma.b2b_user.findFirst({
       where: { user_id: user.id },
-      select: { company_id: true }
+      select: {
+        company_id: true,
+        company: {
+          select: { id: true, is_active: true }
+        }
+      }
     });
-    if (b2bUser) companyId = b2bUser.company_id;
+
+    if (b2bUser) {
+      if (b2bUser.company?.is_active === false) {
+        throw { status: 403, message: 'Your company account has been deactivated. Please contact support.' };
+      }
+      companyId = b2bUser.company_id;
+    }
   }
 
   // Note: Remove or fix the lastLoginAt update if that field doesn't exist in your schema

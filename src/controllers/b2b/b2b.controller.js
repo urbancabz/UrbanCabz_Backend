@@ -232,15 +232,13 @@ const approveB2BRequest = async (req, res) => {
             });
 
             if (user) {
-                // Update existing user to have B2B role
+                // Update existing user to have B2B role and reset to default password
                 user = await tx.user.update({
                     where: { id: user.id },
                     data: {
                         role_id: b2bRole.id,
-                        // If they already have a password, they don't need "first login" flow
-                        // For B2B flow refinement, we set a default password if they don't have one
-                        password_hash: user.password_hash || await bcrypt.hash('UrbanCabz123', 10),
-                        is_first_login: user.password_hash ? false : true
+                        password_hash: await bcrypt.hash('UrbanCabz123', 10),
+                        is_first_login: true
                     }
                 });
             } else {
@@ -809,6 +807,61 @@ const manageCompanyFleet = async (req, res) => {
 };
 
 /**
+ * @route   POST /api/b2b/companies/:id/toggle-status
+ * @desc    Toggle company active/deactivated status
+ * @access  Private/Admin
+ */
+const toggleCompanyStatus = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const companyId = parseInt(id);
+
+        // Single DB call: fetch only what we need
+        const company = await prisma.b2b_company.findUnique({
+            where: { id: companyId },
+            select: { id: true, is_active: true, company_name: true }
+        });
+        if (!company) {
+            return res.status(404).json({ success: false, message: 'Company not found' });
+        }
+
+        // Null-safe: if is_active is null/undefined (old record), treat as true (active)
+        const currentStatus = company.is_active !== false;
+        const newActiveStatus = !currentStatus;
+
+        // Update the fast in-memory cache (O(1), zero DB queries on every subsequent auth check)
+        let deactivatedSet = cache.get('deactivated_companies') || new Set();
+        if (newActiveStatus) {
+            deactivatedSet.delete(companyId); // Reactivating
+        } else {
+            deactivatedSet.add(companyId);    // Deactivating
+        }
+        cache.set('deactivated_companies', deactivatedSet, 86400 * 30); // persist for 30 days
+
+        // Single DB update
+        const updatedCompany = await prisma.b2b_company.update({
+            where: { id: companyId },
+            data: { is_active: newActiveStatus }
+        });
+
+        // Invalidate ALL stale caches
+        cache.invalidate('all_b2b_companies');
+        cache.invalidate(`b2b:company:${companyId}`);
+        cache.invalidate('admin:dashboard_sync'); // Force dashboard to refresh immediately 
+
+        res.json({
+            success: true,
+            message: `Company successfully ${newActiveStatus ? 'activated' : 'deactivated'}`,
+            data: { ...updatedCompany, is_active: newActiveStatus }
+        });
+
+    } catch (error) {
+        console.error('Toggle Company Status Error:', error);
+        res.status(500).json({ success: false, message: 'Failed to toggle company status' });
+    }
+};
+
+/**
  * @route   DELETE /api/b2b/fleet-assignment/:id
  * @desc    Remove a vehicle assignment from a company
  * @access  Private/Admin
@@ -865,10 +918,11 @@ const getMyFleet = async (req, res) => {
                         vehicle: true
                     }
                 });
-
                 // Transform to match public fleet structure but with custom price
                 return assignedFleet.map(item => ({
                     ...item.vehicle,
+                    image: item.vehicle.image_url, // Map image_url to image for frontend compatibility
+                    tags: ['AC', 'Corporate Standard'], // Default tags for B2B
                     base_price_per_km: item.custom_price_per_km
                 }));
             },
@@ -1184,5 +1238,6 @@ module.exports = {
     getCompanyBookingsForAdmin,
     recordCompanyPayment,
     createCompany,
-    updateCompany
+    updateCompany,
+    toggleCompanyStatus
 };

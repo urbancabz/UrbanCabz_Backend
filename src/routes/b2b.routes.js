@@ -32,9 +32,11 @@ router.post('/payments', requireAuth, requireAdmin, b2bController.recordCompanyP
 // Company CRUD (Admin)
 router.post('/companies', requireAuth, requireAdmin, b2bController.createCompany);
 router.put('/companies/:id', requireAuth, requireAdmin, b2bController.updateCompany);
+router.post('/companies/:id/toggle-status', requireAuth, requireAdmin, b2bController.toggleCompanyStatus);
 router.get('/company/:id/fleet', requireAuth, requireRole(['admin']), b2bController.getCompanyFleet);
 router.post('/company/:id/fleet', requireAuth, requireRole(['admin']), b2bController.manageCompanyFleet);
 router.delete('/fleet-assignment/:id', requireAuth, requireRole(['admin']), b2bController.removeCompanyFleet);
+
 
 // B2B User Fleet & Dashboard
 router.get('/my-fleet', requireAuth, requireRole(['b2b_user']), b2bController.getMyFleet);

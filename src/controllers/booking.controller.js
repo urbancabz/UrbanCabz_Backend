@@ -35,6 +35,10 @@ async function createDirectBooking(req, res) {
       passengerDetails
     });
 
+    // Send confirmation email asynchronously (don't block the response)
+    const emailService = require('../services/email.service');
+    emailService.sendBookingConfirmation(booking, req.user).catch(e => console.error('Email Error:', e));
+
     return res.status(201).json({ success: true, booking });
   } catch (err) {
     console.error('[createDirectBooking error]', err);

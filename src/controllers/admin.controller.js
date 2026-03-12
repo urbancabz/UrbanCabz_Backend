@@ -2,7 +2,7 @@
 const prisma = require('../config/prisma');
 const cache = require('../utils/cache');
 
-const BOOKINGS_CACHE_TTL = 65; // 65 seconds — survives 60s frontend polling
+const BOOKINGS_CACHE_TTL = 30; // 30 seconds — balance between fresh data and DB load
 const { validationResult } = require('express-validator');
 const {
   sendTaxiAssignmentWhatsApp,
@@ -29,115 +29,119 @@ async function getDashboardSync(req, res) {
     const dashboardData = await cache.getOrSet(
       cacheKey,
       async () => {
-        // Use interactive transaction so ALL queries share ONE connection.
-        // Without this, 13 sequential queries hold the pool for the entire duration.
-        return await prisma.$transaction(async (tx) => {
-
-          const bookings = await tx.booking.findMany({
+        // Fetch all data points independently to avoid transaction timeouts (P2028)
+        // This is much safer for pooled database connections.
+        
+        const [
+          bookings,
+          pendingPayments,
+          completedBookings,
+          cancelledBookings,
+          users,
+          drivers,
+          fleet,
+          b2bCompanies,
+          b2bRequests,
+          b2bBookings,
+          totalBookingsCount,
+          activeDriversCount,
+          b2bBookingsCount
+        ] = await Promise.all([
+          prisma.booking.findMany({
             take: 100,
             orderBy: { created_at: 'desc' },
             include: { user: true, payments: true, assign_taxis: true }
-          });
-
-          const pendingPayments = await tx.booking.findMany({
+          }),
+          prisma.booking.findMany({
             where: { status: 'PENDING_PAYMENT', payments: { some: { status: { in: ['CREATED', 'PENDING'] } } } },
             take: 50,
             orderBy: { created_at: 'desc' },
             include: { user: true, payments: true, assign_taxis: true }
-          });
-
-          const completedBookings = await tx.booking.findMany({
+          }),
+          prisma.booking.findMany({
             where: { status: 'COMPLETED' },
             take: 50,
             orderBy: { updated_at: 'desc' },
             include: { user: true, payments: true, assign_taxis: true }
-          });
-
-          const cancelledBookings = await tx.booking.findMany({
+          }),
+          prisma.booking.findMany({
             where: { status: 'CANCELLED' },
             take: 50,
             orderBy: { updated_at: 'desc' },
             include: { user: true, payments: true, assign_taxis: true }
-          });
-
-          const users = await tx.user.findMany({
+          }),
+          prisma.user.findMany({
             where: { role: { name: { not: 'b2b_user' } } },
             take: 100,
             orderBy: { created_at: 'desc' },
             include: { role: true, _count: { select: { bookings: true } } }
-          });
-
-          const drivers = await tx.driver.findMany({
+          }),
+          prisma.driver.findMany({
             take: 100,
             orderBy: { name: 'asc' }
-          });
-
-          const fleet = await tx.fleet_vehicle.findMany({
+          }),
+          prisma.fleet_vehicle.findMany({
             where: { is_active: true }
-          });
-
-          const b2bCompanies = await tx.b2b_company.findMany({
+          }),
+          prisma.b2b_company.findMany({
             take: 50,
             orderBy: { company_name: 'asc' },
             include: { _count: { select: { company_fleet: true } } }
-          });
-
-          const b2bRequests = await tx.b2b_request.findMany({
+          }),
+          prisma.b2b_request.findMany({
             take: 50,
             orderBy: { created_at: 'desc' },
             include: { company: { select: { id: true, company_name: true, company_email: true } } }
-          });
-
-          const b2bBookings = await tx.b2b_booking.findMany({
+          }),
+          prisma.b2b_booking.findMany({
             take: 50,
             orderBy: { created_at: 'desc' },
             include: { company: true, bookedByUser: { select: { id: true, name: true, email: true, phone: true } }, assignments: true }
-          });
+          }),
+          prisma.booking.count(),
+          prisma.driver.count({ where: { is_active: true } }),
+          prisma.b2b_booking.count()
+        ]);
 
-          const totalBookingsCount = await tx.booking.count();
-          const activeDriversCount = await tx.driver.count({ where: { is_active: true } });
-          const b2bBookingsCount = await tx.b2b_booking.count();
+        let paidCount = 0;
+        let pendingPaymentCount = 0;
+        let assignedCount = 0;
 
-          let paidCount = 0;
-          let pendingPaymentCount = 0;
-          let assignedCount = 0;
+        bookings.forEach(b => {
+          const isPaid = b.status === 'PAID' || (b.status === 'PENDING_PAYMENT' && b.payments?.some(p => p.status === 'SUCCESS'));
+          if (isPaid) {
+            paidCount++;
+            if (b.taxi_assign_status === 'ASSIGNED') assignedCount++;
+          } else {
+            pendingPaymentCount++;
+          }
+        });
 
-          bookings.forEach(b => {
-            const isPaid = b.status === 'PAID' || (b.status === 'PENDING_PAYMENT' && b.payments?.some(p => p.status === 'SUCCESS'));
-            if (isPaid) {
-              paidCount++;
-              if (b.taxi_assign_status === 'ASSIGNED') assignedCount++;
-            } else {
-              pendingPaymentCount++;
-            }
-          });
+        const readyToAssign = Math.max(0, paidCount - assignedCount);
 
-          const readyToAssign = Math.max(0, paidCount - assignedCount);
-
-          return {
-            bookings,
-            pendingPayments,
-            completedBookings,
-            cancelledBookings,
-            users,
-            drivers,
-            fleet,
-            b2bCompanies,
-            b2bRequests,
-            b2bBookings,
-            stats: {
-              totalBookings: totalBookingsCount,
-              completedBookings: completedBookings.length,
-              pendingBookings: pendingPayments.length,
-              actualPendingPayment: pendingPaymentCount,
-              paidCount,
-              readyToAssign,
-              b2bBookings: b2bBookingsCount,
-              activeDrivers: activeDriversCount
-            },
-            recentUsers: users.slice(0, 5)
-          };
-        }, { timeout: 15000 }); // 15s max for the entire transaction
+        return {
+          bookings,
+          pendingPayments,
+          completedBookings,
+          cancelledBookings,
+          users,
+          drivers,
+          fleet,
+          b2bCompanies,
+          b2bRequests,
+          b2bBookings,
+          stats: {
+            totalBookings: totalBookingsCount,
+            completedBookings: completedBookings.length,
+            pendingBookings: pendingPayments.length,
+            actualPendingPayment: pendingPaymentCount,
+            paidCount,
+            readyToAssign,
+            b2bBookings: b2bBookingsCount,
+            activeDrivers: activeDriversCount
+          },
+          recentUsers: users.slice(0, 5)
+        };
       },
       BOOKINGS_CACHE_TTL
     );
@@ -296,6 +300,12 @@ async function upsertAssignTaxi(req, res) {
     cache.invalidate('admin:bookings');
     cache.invalidate('admin:bookings_100');
     cache.invalidate('admin:dashboard_sync');
+
+    // Send Driver Assigned Email asynchronously if car and driver are actually assigned
+    if (driverName && driverNumber && cabNumber) {
+      const emailService = require('../services/email.service');
+      emailService.sendDriverAssignedEmail(booking, assignment, booking.user).catch(e => console.error('Email Error:', e));
+    }
 
     return res.status(200).json({
       message: 'Taxi assignment saved successfully',
@@ -512,7 +522,10 @@ async function upsertB2BAssignTaxi(req, res) {
 
     const booking = await prisma.b2b_booking.findUnique({
       where: { id: bookingId },
-      include: { company: true }
+      include: { 
+        company: true,
+        bookedByUser: true 
+      }
     });
 
     if (!booking) {
@@ -559,6 +572,12 @@ async function upsertB2BAssignTaxi(req, res) {
     cache.invalidate('admin:b2b_bookings');
     cache.invalidate('admin:b2b_bookings_50');
     cache.invalidate('admin:dashboard_sync');
+
+    // Send Driver Assigned Email asynchronously if car and driver are actually assigned
+    if (driverName && driverNumber && cabNumber && booking.bookedByUser) {
+      const emailService = require('../services/email.service');
+      emailService.sendDriverAssignedEmail(booking, assignment, booking.bookedByUser).catch(e => console.error('Email Error:', e));
+    }
 
     return res.status(200).json({
       success: true,

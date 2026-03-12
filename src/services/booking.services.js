@@ -230,6 +230,12 @@ async function updateBookingAfterPaymentSuccess({
     }
   });
 
+  // Send confirmation email asynchronously (only if it became fully PAID or if you always want to confirm partial)
+  if (booking && booking.user) {
+    const emailService = require('../services/email.service');
+    emailService.sendBookingConfirmation(booking, booking.user).catch(e => console.error('Email Error:', e));
+  }
+
   return booking;
 }
 
