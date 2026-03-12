@@ -45,9 +45,7 @@ const prisma = new PrismaClient({
     log: ['error'],
     datasources: {
         db: {
-            url: process.env.DATABASE_URL && process.env.DATABASE_URL.includes('connection_limit')
-                ? process.env.DATABASE_URL
-                : `${process.env.DATABASE_URL}${process.env.DATABASE_URL && process.env.DATABASE_URL.includes('?') ? '&' : '?'}connection_limit=3&pool_timeout=60`
+            url: buildPrismaUrl(process.env.DATABASE_URL || '')
         }
     }
 });
