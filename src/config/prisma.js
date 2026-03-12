@@ -8,35 +8,35 @@ function buildPrismaUrl(url) {
     if (!url) return url;
     let newUrl = url.trim();
 
-    // 1. Remove any existing connection parameters to force our stable values
+    // 1. Remove ANY existing connection parameters to force our stable values
     newUrl = newUrl.replace(/([?&])connection_limit=\d+/g, '');
     newUrl = newUrl.replace(/([?&])pool_timeout=\d+/g, '');
     newUrl = newUrl.replace(/([?&])connect_timeout=\d+/g, '');
+    newUrl = newUrl.replace(/([?&])pgbouncer=true/g, '');
 
     // 2. Add stable parameters
     const params = [];
-    if (newUrl.includes(':6543') && !newUrl.includes('pgbouncer=true')) {
+    
+    // Always use pgbouncer if on port 6543
+    if (newUrl.includes(':6543')) {
         params.push('pgbouncer=true');
     }
-    if (!newUrl.includes('sslmode=')) {
-        params.push('sslmode=require');
-    }
+    
+    // Always require SSL
+    params.push('sslmode=require');
 
-    // Optimization for Render -> Singapore Supabase
-    params.push('connection_limit=10'); // Increase from 3 to 10 for more headroom
-    params.push('pool_timeout=40');     // Wait up to 40s for a connection from the pool
-    params.push('connect_timeout=30');  // Wait up to 30s for the initial handshake
+    // FORCE STABLE LIMITS (Overriding whatever is in Render ENV)
+    params.push('connection_limit=3'); 
+    params.push('pool_timeout=60');    
+    params.push('connect_timeout=30'); 
 
     // 3. Clean up the URL and append params
-    newUrl = newUrl.replace(/[?&]$/, ''); // Remove trailing ? or &
-    newUrl += (newUrl.includes('?') ? '&' : '?') + params.join('&');
-
-    // Remove double && if any were created
-    newUrl = newUrl.replace(/&&+/g, '&');
+    newUrl = newUrl.split('?')[0]; // Remove everything after ?
+    newUrl += '?' + params.join('&');
 
     // Log obfuscated URL for debugging
     const obfuscated = newUrl.replace(/:([^@]+)@/, ':****@');
-    console.log(`📡 Prisma configured with URL: ${obfuscated}`);
+    console.log(`📡 FORCING STABLE PRISMA URL: ${obfuscated}`);
 
     return newUrl;
 }
@@ -45,9 +45,7 @@ const prisma = new PrismaClient({
     log: ['error'],
     datasources: {
         db: {
-            url: process.env.DATABASE_URL && process.env.DATABASE_URL.includes('connection_limit')
-                ? process.env.DATABASE_URL
-                : `${process.env.DATABASE_URL}${process.env.DATABASE_URL && process.env.DATABASE_URL.includes('?') ? '&' : '?'}connection_limit=3&pool_timeout=60`
+            url: buildPrismaUrl(process.env.DATABASE_URL || '')
         }
     }
 });
