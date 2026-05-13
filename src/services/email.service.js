@@ -105,8 +105,9 @@ async function sendBookingConfirmation(booking, user, passengerEmail) {
           <div style="background: #f9fafb; padding: 18px; border-radius: 10px; margin: 20px 0; border-left: 4px solid #EAB308;">
             <p style="margin: 6px 0;"><strong>📋 Booking ID:</strong> #${booking.id}</p>
             <p style="margin: 6px 0;"><strong>🟢 Pickup:</strong> ${booking.pickup_location}</p>
-            ${booking.full_pickup_address ? `<p style="margin: 6px 0;"><strong>📍 Full Address:</strong> ${booking.full_pickup_address}</p>` : ''}
+            ${booking.full_pickup_address ? `<p style="margin: 6px 0;"><strong>📍 Full Pickup Address:</strong> ${booking.full_pickup_address}</p>` : ''}
             <p style="margin: 6px 0;"><strong>🔴 Drop:</strong> ${booking.drop_location}</p>
+            ${booking.full_drop_address ? `<p style="margin: 6px 0;"><strong>📍 Full Drop Address:</strong> ${booking.full_drop_address}</p>` : ''}
             ${booking.distance_km ? `<p style="margin: 6px 0;"><strong>📏 Est. Distance:</strong> ${booking.distance_km} km</p>` : ''}
             ${booking.scheduled_at ? `<p style="margin: 6px 0;"><strong>🕐 Pickup Time:</strong> ${new Date(booking.scheduled_at).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}</p>` : ''}
             <p style="margin: 6px 0;"><strong>💰 Total Fare:</strong> ₹${booking.total_amount}</p>

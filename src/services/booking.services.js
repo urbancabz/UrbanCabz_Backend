@@ -92,6 +92,7 @@ async function createDirectBooking({
       passenger_phone: passengerDetails?.phone || null,
       id_card_number: passengerDetails?.idCardNumber || null,
       full_pickup_address: passengerDetails?.fullPickupAddress || null,
+      full_drop_address: passengerDetails?.fullDropAddress || null,
       remarks: passengerDetails?.remarks || null,
       status: 'PENDING_PAYMENT', // It's a cash booking, payment is pending
       payments: {

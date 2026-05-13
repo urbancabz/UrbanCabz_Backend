@@ -54,6 +54,7 @@ model booking {
   passenger_phone     String?
   id_card_number      String?
   full_pickup_address String?
+  full_drop_address   String?
   remarks             String?
 
   // NEW: Actual trip values (entered by admin after trip)
@@ -271,6 +272,7 @@ model b2b_booking {
   passenger_phone     String?
   id_card_number      String?
   full_pickup_address String?
+  full_drop_address   String?
   remarks             String?
 
   actual_km       Float?
