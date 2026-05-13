@@ -486,6 +486,11 @@ const createCreditBooking = async (req, res) => {
                 estimated_fare: bookingData.estimatedFare || bookingData.estimated_fare || null,
                 total_amount: bookingData.totalAmount || bookingData.total_amount,
                 car_model: carModel,
+                passenger_name: bookingData.passengerDetails?.name || null,
+                passenger_phone: bookingData.passengerDetails?.phone || null,
+                id_card_number: bookingData.passengerDetails?.idCardNumber || null,
+                full_pickup_address: bookingData.passengerDetails?.fullPickupAddress || null,
+                remarks: bookingData.passengerDetails?.remarks || null,
                 status: 'CONFIRMED',
                 taxi_assign_status: 'NOT_ASSIGNED'
             }

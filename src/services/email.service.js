@@ -83,28 +83,45 @@ async function sendWelcomeEmail(user) {
 
 /**
  * Send Booking Confirmation Email
+ * @param {object} booking       - Booking record from DB
+ * @param {object} user          - User record (name, email)
+ * @param {string} [passengerEmail] - Optional override: passenger's entered email
  */
-async function sendBookingConfirmation(booking, user) {
-    const subject = `Booking Confirmed #${booking.id} - Urban Cabz`;
-    const html = `
-      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; color: #333;">
-        <h2 style="color: #22c55e;">Booking Confirmed! ✅</h2>
-        <p>Hi ${user.name},</p>
-        <p>Your ride has been successfully booked.</p>
-        
-        <div style="background: #f9fafb; padding: 15px; border-radius: 8px; margin: 20px 0;">
-            <p><strong>Booking ID:</strong> #${booking.id}</p>
-            <p><strong>Pickup:</strong> ${booking.pickup_location}</p>
-            <p><strong>Drop:</strong> ${booking.drop_location}</p>
-            <p><strong>Estimated Fare:</strong> ₹${booking.estimated_fare}</p>
-        </div>
+async function sendBookingConfirmation(booking, user, passengerEmail) {
+    const recipientEmail = passengerEmail || user.email;
+    const recipientName  = booking.passenger_name || user.name || 'Valued Customer';
 
-        <p>We will notify you once a driver is assigned.</p>
-        <br/>
-        <p>Safe Travels,<br/>The Urban Cabz Team</p>
+    const subject = `Booking Confirmed #${booking.id} - Urban Cabz 🚖`;
+    const html = `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; color: #333; border: 1px solid #e5e7eb; border-radius: 12px; overflow: hidden;">
+        <div style="background: linear-gradient(135deg, #EAB308, #F97316); padding: 24px; text-align: center;">
+          <h1 style="color: #fff; margin: 0; font-size: 22px;">🚖 Urban Cabz</h1>
+          <p style="color: #fffbeb; margin: 6px 0 0 0; font-size: 13px;">Your trusted ride partner</p>
+        </div>
+        <div style="padding: 28px 24px;">
+          <h2 style="color: #22c55e; margin-top: 0;">Booking Confirmed! ✅</h2>
+          <p>Hi <strong>${recipientName}</strong>,</p>
+          <p>Your ride has been successfully booked. Here are your trip details:</p>
+          <div style="background: #f9fafb; padding: 18px; border-radius: 10px; margin: 20px 0; border-left: 4px solid #EAB308;">
+            <p style="margin: 6px 0;"><strong>📋 Booking ID:</strong> #${booking.id}</p>
+            <p style="margin: 6px 0;"><strong>🟢 Pickup:</strong> ${booking.pickup_location}</p>
+            ${booking.full_pickup_address ? `<p style="margin: 6px 0;"><strong>📍 Full Address:</strong> ${booking.full_pickup_address}</p>` : ''}
+            <p style="margin: 6px 0;"><strong>🔴 Drop:</strong> ${booking.drop_location}</p>
+            ${booking.distance_km ? `<p style="margin: 6px 0;"><strong>📏 Est. Distance:</strong> ${booking.distance_km} km</p>` : ''}
+            ${booking.scheduled_at ? `<p style="margin: 6px 0;"><strong>🕐 Pickup Time:</strong> ${new Date(booking.scheduled_at).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}</p>` : ''}
+            <p style="margin: 6px 0;"><strong>💰 Total Fare:</strong> ₹${booking.total_amount}</p>
+            <p style="margin: 6px 0;"><strong>💳 Payment:</strong> Cash / UPI to Driver</p>
+          </div>
+          <p style="color: #6b7280; font-size: 13px;">We will notify you once a driver is assigned to your trip.</p>
+          <p style="color: #6b7280; font-size: 13px;">For queries, contact us at <a href="mailto:contact@urbancabz.com" style="color: #EAB308;">contact@urbancabz.com</a></p>
+        </div>
+        <div style="background: #f3f4f6; padding: 16px 24px; text-align: center; border-top: 1px solid #e5e7eb;">
+          <p style="margin: 0; color: #9ca3af; font-size: 12px;">Safe Travels 🙏 — The Urban Cabz Team</p>
+          <p style="margin: 4px 0 0 0; color: #d1d5db; font-size: 11px;">© 2025 Urban Cabz. All rights reserved.</p>
+        </div>
       </div>
     `;
-    return sendEmail({ to: user.email, subject, html });
+    return sendEmail({ to: recipientEmail, subject, html });
 }
 
 /**

@@ -63,4 +63,32 @@ function requireRole(roles = []) {
 
 const requireAdmin = requireRole(['ADMIN', 'admin']);
 
-module.exports = { requireAuth, requireRole, requireAdmin };
+async function optionalAuth(req, res, next) {
+  try {
+    const auth = req.headers.authorization;
+    if (!auth || !auth.startsWith('Bearer ')) {
+      return next();
+    }
+
+    const token = auth.split(' ')[1];
+    const payload = verifyToken(token);
+
+    req.user = {
+      id: payload.userId,
+      role: payload.role || null,
+      companyId: payload.companyId || null
+    };
+
+    if (req.user.companyId) {
+      const deactivatedSet = cache.get('deactivated_companies') || new Set();
+      if (deactivatedSet.has(req.user.companyId)) {
+        return res.status(401).json({ message: 'Account deactivated. Please contact support.' });
+      }
+    }
+    return next();
+  } catch (err) {
+    return next();
+  }
+}
+
+module.exports = { requireAuth, requireRole, requireAdmin, optionalAuth };

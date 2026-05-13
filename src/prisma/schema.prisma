@@ -49,6 +49,13 @@ model booking {
   estimated_fare  Float?
   total_amount    Float
 
+  // Passenger details
+  passenger_name      String?
+  passenger_phone     String?
+  id_card_number      String?
+  full_pickup_address String?
+  remarks             String?
+
   // NEW: Actual trip values (entered by admin after trip)
   actual_km       Float?
   extra_km        Float?
@@ -258,6 +265,13 @@ model b2b_booking {
   distance_km     Float?
   estimated_fare  Float?
   total_amount    Float
+
+  // Passenger details
+  passenger_name      String?
+  passenger_phone     String?
+  id_card_number      String?
+  full_pickup_address String?
+  remarks             String?
 
   actual_km       Float?
   extra_km        Float?

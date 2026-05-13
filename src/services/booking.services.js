@@ -78,15 +78,6 @@ async function createDirectBooking({
     throw { status: 400, message: 'totalAmount is required' };
   }
 
-  // Add notes from passenger details if provided (like remarks, external name/phone if booking for someone else)
-  let remarks = "";
-  if (passengerDetails) {
-    if (passengerDetails.remarks) remarks += `Remarks: ${passengerDetails.remarks}\n`;
-    if (passengerDetails.name) remarks += `Passenger Name: ${passengerDetails.name}\n`;
-    if (passengerDetails.phone) remarks += `Passenger Phone: ${passengerDetails.phone}\n`;
-  }
-
-  // Use a transaction if we want to add to booking_note as well, but for now we omit extra notes table and just create payment
   const booking = await prisma.booking.create({
     data: {
       user_id: userId,
@@ -97,6 +88,11 @@ async function createDirectBooking({
       estimated_fare: estimatedFare || null,
       total_amount: totalAmount,
       car_model: carModel || null, // Save car model
+      passenger_name: passengerDetails?.name || null,
+      passenger_phone: passengerDetails?.phone || null,
+      id_card_number: passengerDetails?.idCardNumber || null,
+      full_pickup_address: passengerDetails?.fullPickupAddress || null,
+      remarks: passengerDetails?.remarks || null,
       status: 'PENDING_PAYMENT', // It's a cash booking, payment is pending
       payments: {
         create: {

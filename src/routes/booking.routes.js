@@ -2,7 +2,7 @@
 const express = require('express');
 const { body } = require('express-validator');
 const bookingController = require('../controllers/booking.controller');
-const { requireAuth } = require('../middlewares/auth.middleware');
+const { requireAuth, optionalAuth } = require('../middlewares/auth.middleware');
 
 const router = express.Router();
 
@@ -10,7 +10,7 @@ const router = express.Router();
 // router.post('/after-payment', ...);
 
 // POST /api/v1/bookings/create
-router.post('/create', requireAuth, bookingController.createDirectBooking);
+router.post('/create', optionalAuth, bookingController.createDirectBooking);
 
 // GET /api/v1/bookings/my
 router.get('/my', requireAuth, bookingController.getMyBookings);

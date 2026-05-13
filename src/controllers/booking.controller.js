@@ -7,7 +7,7 @@ const bookingService = require('../services/booking.services');
  */
 async function createDirectBooking(req, res) {
   try {
-    const userId = req.user.id;
+    let userId = req.user?.id;
     const {
       pickupLocation,
       dropLocation,
@@ -23,6 +23,37 @@ async function createDirectBooking(req, res) {
       return res.status(400).json({ success: false, message: 'Missing required fields' });
     }
 
+    if (!userId) {
+      if (!passengerDetails || !passengerDetails.phone) {
+        return res.status(400).json({ success: false, message: 'Passenger details (phone) required for guest booking' });
+      }
+
+      const prisma = require('../config/prisma');
+      let user = await prisma.user.findFirst({
+        where: { phone: passengerDetails.phone }
+      });
+
+      if (!user && passengerDetails.email) {
+        user = await prisma.user.findFirst({
+          where: { email: passengerDetails.email }
+        });
+      }
+
+      if (!user) {
+        user = await prisma.user.create({
+          data: {
+            name: passengerDetails.name || 'Guest User',
+            phone: passengerDetails.phone,
+            email: passengerDetails.email || `${passengerDetails.phone}@guest.urbancabz.com`,
+            is_verified: false
+          }
+        });
+      }
+      userId = user.id;
+      // Make sure req.user is available for the email service later
+      req.user = user;
+    }
+
     const booking = await bookingService.createDirectBooking({
       userId,
       pickupLocation,
@@ -35,9 +66,10 @@ async function createDirectBooking(req, res) {
       passengerDetails
     });
 
-    // Send confirmation email asynchronously (don't block the response)
+    // Send confirmation email to the passenger's entered email (preferred) or user account email
     const emailService = require('../services/email.service');
-    emailService.sendBookingConfirmation(booking, req.user).catch(e => console.error('Email Error:', e));
+    const passengerEmail = passengerDetails?.email;
+    emailService.sendBookingConfirmation(booking, req.user, passengerEmail).catch(e => console.error('Email Error:', e));
 
     return res.status(201).json({ success: true, booking });
   } catch (err) {
